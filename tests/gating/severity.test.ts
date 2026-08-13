@@ -57,12 +57,12 @@ describe('classify — git destructive-operation rules', () => {
     assert.notEqual(classify(action('git clean -f')), 'high');
   });
 
-  test('force-push with --force classifies as high', () => {
-    assert.equal(classify(action('git push --force origin main')), 'high');
+  test('force-push to a non-protected branch classifies as high (not critical)', () => {
+    assert.equal(classify(action('git push --force origin feature/my-branch')), 'high');
   });
 
-  test('force-push with -f classifies as high', () => {
-    assert.equal(classify(action('git push -f origin main')), 'high');
+  test('force-push with an ambiguous/unresolved target classifies as high (not critical)', () => {
+    assert.equal(classify(action('git push --force origin')), 'high');
   });
 
   test('a refspec resolved to a protected branch (main) classifies as high even without force', () => {
@@ -79,6 +79,28 @@ describe('classify — git destructive-operation rules', () => {
 
   test('an ambiguous push target (no refspec) classifies as high', () => {
     assert.equal(classify(action('git push origin')), 'high');
+  });
+});
+
+describe('classify — force-push to a protected branch is Critical per spec exemplar', () => {
+  test('git push --force origin main classifies as critical', () => {
+    assert.equal(classify(action('git push --force origin main')), 'critical');
+  });
+
+  test('git push -f origin master classifies as critical', () => {
+    assert.equal(classify(action('git push -f origin master')), 'critical');
+  });
+
+  test('git push --force-with-lease origin HEAD:main classifies as critical', () => {
+    assert.equal(classify(action('git push --force-with-lease origin HEAD:main')), 'critical');
+  });
+
+  test('git push --force origin release/1.0 classifies as critical', () => {
+    assert.equal(classify(action('git push --force origin release/1.0')), 'critical');
+  });
+
+  test('a low or high adapter hint cannot lower a critical rule result', () => {
+    assert.equal(classify(action('git push --force origin main', { adapterSeverityHint: 'high' })), 'critical');
   });
 });
 

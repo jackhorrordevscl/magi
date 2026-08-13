@@ -15,7 +15,12 @@ export function classify(action: ProposedAction): SeverityTier {
 
 // --- Tier ordering --------------------------------------------------------
 
-const TIER_ORDER: Record<SeverityTier, number> = { low: 0, medium: 1, high: 2 };
+// NOTE: PR2 widened SeverityTierSchema to 4 tiers (added `critical`) for
+// the consensus/quorum layer — see proposed-action.ts. The rule table below
+// emits `critical` for the spec's own exemplar (force-push resolving to an
+// explicitly-identified protected branch, e.g. main) — see
+// `git-push-force-protected-branch`.
+const TIER_ORDER: Record<SeverityTier, number> = { low: 0, medium: 1, high: 2, critical: 3 };
 
 function maxTier(a: SeverityTier, b: SeverityTier): SeverityTier {
   return TIER_ORDER[a] >= TIER_ORDER[b] ? a : b;
@@ -116,6 +121,31 @@ const GIT_RULES: GitRule[] = [
       );
     },
     tier: 'high',
+  },
+  {
+    // Spec exemplar (Severity Tier Classification, Critical): "force-push to
+    // main". A force-push that resolves to an explicitly identified
+    // protected branch is irreversible on shared state, not merely
+    // high-blast-radius — escalate above the generic force-push rule.
+    // Ambiguous/unresolved force-push targets stay High (see
+    // git-push-ambiguous-target) since we can't confirm the destination.
+    id: 'git-push-force-protected-branch',
+    matches: (sub) => {
+      if (sub.args[0] !== 'push') return false;
+      const isForce = sub.args.some(
+        (a) =>
+          a === '--force' ||
+          a === '--force-with-lease' ||
+          (a.startsWith('-') && !a.startsWith('--') && a.slice(1).includes('f')),
+      );
+      if (!isForce) return false;
+      const nonFlagArgs = sub.args.slice(1).filter((a) => !a.startsWith('-'));
+      if (nonFlagArgs.length < 2) return false;
+      const refspec = nonFlagArgs[1] as string;
+      const dest = refspec.includes(':') ? (refspec.split(':')[1] ?? '') : refspec;
+      return isProtectedBranchName(dest);
+    },
+    tier: 'critical',
   },
   {
     id: 'git-push-protected-branch-refspec',

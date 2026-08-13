@@ -1,12 +1,14 @@
 import { z } from 'zod';
+import type { SeverityTier } from './proposed-action.ts';
 
 /**
- * STUB (PR1 scope): data shapes only.
+ * Vote/evaluator data shapes (PR1) plus quorum resolution logic (PR2).
  *
- * The three-evaluator quorum/consensus resolution logic (melchior,
- * balthasar, casper voting + divergence-floor handling) lands in PR2. This
- * file exists in PR1 solely so `Vote` compiles and is importable by
- * `src/audit/record.ts` and by later PRs.
+ * The three evaluators (melchior, balthasar, casper) each cast exactly one
+ * vote per action (`src/gating/evaluator-port.ts` / the concrete Anthropic
+ * evaluators land in PR3 — out of this PR's scope). `resolveConsensus`
+ * below is the pure, deterministic quorum rule that turns those three
+ * votes plus a severity tier into a single allow/deny decision.
  */
 
 export const EvaluatorSchema = z.enum(['melchior', 'balthasar', 'casper']);
@@ -22,6 +24,24 @@ export const VoteSchema = z.object({
 });
 export type Vote = z.infer<typeof VoteSchema>;
 
-// TODO(PR2): implement quorum/consensus resolution over three Vote
-// records (one per evaluator) plus the divergence floor from
-// magi.config.json (`tiers.divergenceFloorPercent`).
+/** Tiers that require unanimous 3-of-3 allow rather than 2-of-3. */
+const UNANIMOUS_TIERS: ReadonlySet<SeverityTier> = new Set<SeverityTier>(['high', 'critical']);
+
+/**
+ * Resolves the quorum decision for a fully-collected set of votes against a
+ * severity tier. Pure and deterministic — no model call, no I/O.
+ *
+ * Rule (per spec Requirement: Consensus and Quorum):
+ * - Low/Medium severity: at least 2-of-3 `allow` votes -> allow.
+ * - High/Critical severity: unanimous 3-of-3 `allow` -> allow.
+ * - `abstain` NEVER counts toward allow, in any tier, at any count — it is
+ *   treated identically to `deny` for quorum-counting purposes.
+ *
+ * See `tests/gating/consensus.test.ts` for the full 27-combination x
+ * 4-tier RED matrix this implements.
+ */
+export function resolveConsensus(votes: Vote[], tier: SeverityTier): 'allow' | 'deny' {
+  const allowCount = votes.filter((v) => v.vote === 'allow').length;
+  const requiredAllow = UNANIMOUS_TIERS.has(tier) ? 3 : 2;
+  return allowCount >= requiredAllow ? 'allow' : 'deny';
+}

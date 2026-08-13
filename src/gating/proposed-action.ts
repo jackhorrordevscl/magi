@@ -12,8 +12,15 @@ export type MagiMode = z.infer<typeof MagiModeSchema>;
 /**
  * Severity tier assigned to an action, either by the rule-based classifier
  * (see `src/gating/severity.ts`) or hinted by an upstream adapter.
+ *
+ * Four tiers per the approved spec (Requirement: Severity Tier
+ * Classification): `critical` = irreversible on production/shared state
+ * (e.g. force-push to a protected branch), `high` = broad blast radius but
+ * not fully irreversible, `medium` = reversible non-trivial, `low` = local
+ * reversible. See `src/gating/severity.ts` for the rule table and
+ * `src/gating/consensus.ts` for how each tier's quorum requirement differs.
  */
-export const SeverityTierSchema = z.enum(['low', 'medium', 'high']);
+export const SeverityTierSchema = z.enum(['low', 'medium', 'high', 'critical']);
 export type SeverityTier = z.infer<typeof SeverityTierSchema>;
 
 /**
