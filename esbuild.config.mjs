@@ -1,11 +1,13 @@
-// Bundles the magi CLI / Claude Code hook binary into a single executable
-// file with esbuild.
+// Bundles the `magi` CLI binary (src/cli/main.ts, added in PR4/Phase 9)
+// into a single executable file with esbuild. The Claude Code
+// `PreToolUse` hook adapter (claude-code-hook/index.ts) is a separate,
+// unbundled entrypoint — Claude Code invokes it directly via `node
+// claude-code-hook/index.ts`, so it is intentionally not part of this
+// bundle.
 //
-// TODO(PR4): the real entrypoint (src/cli/main.ts) is introduced by the
-// Phase 9 hook adapter work unit. Until that file exists, this script is a
-// safe no-op so `npm run build` never hard-fails on a fresh checkout of
-// this PR's scope (Phases 1-4 only: data contracts, shell parser, severity
-// classification, trivial allowlist).
+// The existsSync guard below is kept as a defensive fallback (harmless
+// no-op) in case this script is ever run against an older checkout that
+// predates src/cli/main.ts.
 import { build } from 'esbuild';
 import { existsSync } from 'node:fs';
 import path from 'node:path';
@@ -14,9 +16,7 @@ const entry = path.resolve('src/cli/main.ts');
 const outfile = path.resolve('dist/magi.mjs');
 
 if (!existsSync(entry)) {
-  console.log(
-    `[esbuild.config] Entrypoint not found at ${entry} (added in PR4 hook adapter). Skipping bundle.`,
-  );
+  console.log(`[esbuild.config] Entrypoint not found at ${entry}. Skipping bundle.`);
   process.exit(0);
 }
 
