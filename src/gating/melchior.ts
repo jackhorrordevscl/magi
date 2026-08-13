@@ -1,5 +1,6 @@
-import { AnthropicEvaluator } from './anthropic-evaluator.ts';
-import type { AnthropicEvaluatorOptions, CalibrationFacet } from './anthropic-evaluator.ts';
+import { GroqEvaluator } from './groq-evaluator.ts';
+import type { GroqEvaluatorOptions } from './groq-evaluator.ts';
+import type { CalibrationFacet } from './anthropic-evaluator.ts';
 
 /**
  * Melchior — the fact/consistency evaluator, per spec Requirement:
@@ -20,9 +21,9 @@ export const MELCHIOR_FACET: CalibrationFacet = {
 };
 
 /** Creates a Melchior evaluator instance. `options` allows test/DI overrides (client, model, timeoutMs, apiKey). */
-export function createMelchior(options: AnthropicEvaluatorOptions = {}): AnthropicEvaluator {
-  return new AnthropicEvaluator('melchior', MELCHIOR_FACET, options);
+export function createMelchior(options: GroqEvaluatorOptions = {}): GroqEvaluator {
+  return new GroqEvaluator('melchior', MELCHIOR_FACET, { model: 'openai/gpt-oss-120b', ...options });
 }
 
-/** Default Melchior instance, backed by the real Anthropic API (`ANTHROPIC_API_KEY`). */
-export const melchior: AnthropicEvaluator = createMelchior();
+/** Default Melchior instance, backed by Groq's free tier (`GROQ_API_KEY`), model: openai/gpt-oss-120b. */
+export const melchior: GroqEvaluator = createMelchior();

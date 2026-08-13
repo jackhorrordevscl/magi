@@ -47,6 +47,21 @@ requires a unanimous 3-of-3 `allow`. `abstain` never counts toward allow,
 at any tier. Sync-tier evaluator timeout or transport error is treated as
 `deny` (fail-closed), never `allow`.
 
+By default, all three named evaluators are backed by
+[Groq](https://groq.com)'s free-tier API (`src/gating/groq-evaluator.ts`,
+`GROQ_API_KEY` — free, no card required), each on its own confirmed
+free-tier model: Melchior uses `openai/gpt-oss-120b`, Balthasar uses
+`llama-3.3-70b-versatile`, and Casper uses `llama-3.1-8b-instant`. The
+Anthropic-backed implementation (`src/gating/anthropic-evaluator.ts`,
+`ANTHROPIC_API_KEY`) still ships and satisfies the same `EvaluatorPort`
+contract. Each `create*` function (`createMelchior`/`createBalthasar`/
+`createCasper`) accepts `GroqEvaluatorOptions` (`client`, `apiKey`, `model`,
+`timeoutMs`, `maxTokens`, `baseUrl`) to override the default Groq backend's
+settings or inject a test double; to swap the backend entirely (e.g. back
+to Anthropic), construct `new AnthropicEvaluator(name, facet, options)`
+directly with the matching facet from `melchior.ts`/`balthasar.ts`/
+`casper.ts` instead of using `create*`.
+
 ## Shadow mode: always allows, always records
 
 **`MAGI_MODE=shadow` never blocks a tool call, regardless of the computed

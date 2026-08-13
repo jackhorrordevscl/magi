@@ -1,5 +1,6 @@
-import { AnthropicEvaluator } from './anthropic-evaluator.ts';
-import type { AnthropicEvaluatorOptions, CalibrationFacet } from './anthropic-evaluator.ts';
+import { GroqEvaluator } from './groq-evaluator.ts';
+import type { GroqEvaluatorOptions } from './groq-evaluator.ts';
+import type { CalibrationFacet } from './anthropic-evaluator.ts';
 
 /**
  * Balthasar — the blast-radius-to-others + policy evaluator, per spec
@@ -21,9 +22,9 @@ export const BALTHASAR_FACET: CalibrationFacet = {
 };
 
 /** Creates a Balthasar evaluator instance. `options` allows test/DI overrides (client, model, timeoutMs, apiKey). */
-export function createBalthasar(options: AnthropicEvaluatorOptions = {}): AnthropicEvaluator {
-  return new AnthropicEvaluator('balthasar', BALTHASAR_FACET, options);
+export function createBalthasar(options: GroqEvaluatorOptions = {}): GroqEvaluator {
+  return new GroqEvaluator('balthasar', BALTHASAR_FACET, { model: 'llama-3.3-70b-versatile', ...options });
 }
 
-/** Default Balthasar instance, backed by the real Anthropic API (`ANTHROPIC_API_KEY`). */
-export const balthasar: AnthropicEvaluator = createBalthasar();
+/** Default Balthasar instance, backed by Groq's free tier (`GROQ_API_KEY`), model: llama-3.3-70b-versatile. */
+export const balthasar: GroqEvaluator = createBalthasar();

@@ -1,5 +1,6 @@
-import { AnthropicEvaluator } from './anthropic-evaluator.ts';
-import type { AnthropicEvaluatorOptions, CalibrationFacet } from './anthropic-evaluator.ts';
+import { GroqEvaluator } from './groq-evaluator.ts';
+import type { GroqEvaluatorOptions } from './groq-evaluator.ts';
+import type { CalibrationFacet } from './anthropic-evaluator.ts';
 
 /**
  * Casper — the actor-risk/anomaly evaluator, per spec Requirement:
@@ -22,9 +23,9 @@ export const CASPER_FACET: CalibrationFacet = {
 };
 
 /** Creates a Casper evaluator instance. `options` allows test/DI overrides (client, model, timeoutMs, apiKey). */
-export function createCasper(options: AnthropicEvaluatorOptions = {}): AnthropicEvaluator {
-  return new AnthropicEvaluator('casper', CASPER_FACET, options);
+export function createCasper(options: GroqEvaluatorOptions = {}): GroqEvaluator {
+  return new GroqEvaluator('casper', CASPER_FACET, { model: 'llama-3.1-8b-instant', ...options });
 }
 
-/** Default Casper instance, backed by the real Anthropic API (`ANTHROPIC_API_KEY`). */
-export const casper: AnthropicEvaluator = createCasper();
+/** Default Casper instance, backed by Groq's free tier (`GROQ_API_KEY`), model: llama-3.1-8b-instant. */
+export const casper: GroqEvaluator = createCasper();
