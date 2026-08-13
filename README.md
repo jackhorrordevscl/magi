@@ -13,8 +13,8 @@ core, hash-chained audit log with an audited human-override record kind, a
 Claude Code `PreToolUse` hook adapter supporting both **shadow** and
 **enforcing** mode, and a human-grounded calibration corpus + divergence
 harness. On top of that base, P4 extends the deterministic severity
-classifier with a non-git threat matrix (implemented and committed, pending
-formal verification and archive — see
+classifier with a non-git threat matrix (implemented, verified, and
+archived — see
 [Non-git threat matrix](#non-git-threat-matrix-p4) below). See
 [Scope](#scope-p0p4-this-repository) and
 [Out of scope](#out-of-scope--not-implemented-here) below for the precise
@@ -38,7 +38,7 @@ below for exactly what each mode does.
 | P1 — shadow-mode hook | The Claude Code `PreToolUse` hook adapter (`claude-code-hook/index.ts`), wiring allowlist → severity → evaluators → consensus → verdict → audit into one pipeline, running in `MAGI_MODE=shadow`. |
 | P2 — calibration + divergence harness | A local, human-grounded calibration corpus (`src/calibration/corpus.ts`), deterministic lexical exemplar retrieval (`src/calibration/selector.ts`), and a divergence harness (`src/calibration/divergence-harness.ts`) that proves the three evaluator facets genuinely disagree on designed-divergent fixtures and agree on controls — catching cosmetic persona collapse. |
 | P3 — enforcing mode + audited human override | `MAGI_MODE=enforced` actually blocks a `deny` verdict via Claude Code's documented `hookSpecificOutput` contract, and `magi audit override <hash> --reason "<why>"` lets an operator document that a recorded deny should be disregarded without mutating the audit chain. |
-| P4 — non-git threat-matrix extension | A `NON_GIT_RULES` table in the severity classifier (`src/gating/severity.ts`) covering 8 destructive command families beyond `git`, plus a dispatch fix so `sudo`/`doas`-prefixed commands no longer bypass the threat matrix. Implemented and committed (`045ce2f`); pending formal `sdd-verify`/`sdd-archive` — see [Non-git threat matrix](#non-git-threat-matrix-p4) below. |
+| P4 — non-git threat-matrix extension | A `NON_GIT_RULES` table in the severity classifier (`src/gating/severity.ts`) covering 8 destructive command families beyond `git`, plus a dispatch fix so `sudo`/`doas`-prefixed commands no longer bypass the threat matrix. Verified (`sdd-verify`: PASS WITH WARNINGS, 0 critical) and archived — see [Non-git threat matrix](#non-git-threat-matrix-p4) below. |
 
 Three independent evaluators back every non-trivial gated action:
 
@@ -173,11 +173,15 @@ threat matrix (git rules included) because the parser reported `sudo` as
 the executable — dispatch now normalizes past the sudo/doas wrapper before
 classification.
 
-This work is implemented and committed (`045ce2f` on `master`, on top of
-the P0–P3 base), with the full test suite passing (394/394), but it has
-**not** yet gone through `sdd-verify`/`sdd-archive` — treat it as
-implemented and pending formal verification and archive, not fully closed
-like P0–P3.
+This work is implemented, verified, and archived (`045ce2f` on `master`,
+on top of the P0–P3 base; `a874dd7` fixes a `dd`-tier gap `sdd-verify`
+caught against the approved spec — a `dd` invocation that isn't a device
+write now correctly escalates to `high` instead of falling through to
+`low`), with the full test suite passing (395/395). `sdd-verify`'s final
+verdict is PASS WITH WARNINGS: 0 critical findings, 1 non-blocking
+warning (missing a literal `python3 script.py` negative test for the
+bare-interpreter rule), 1 cosmetic suggestion (a scenario-count doc
+mismatch in the spec) — neither blocks correctness.
 
 ## Out of scope — NOT implemented here
 

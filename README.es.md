@@ -15,8 +15,8 @@ registro de anulación humana auditada, un adaptador de hook `PreToolUse`
 de Claude Code que soporta tanto el modo **shadow** como el **enforcing**,
 y un corpus de calibración basado en juicio humano + un harness de
 divergencia. Sobre esa base, P4 extiende el clasificador de severidad
-determinístico con una matriz de amenazas no-git (implementado y
-commiteado, pendiente de verificación y archivo formal — ver
+determinístico con una matriz de amenazas no-git (implementado, verificado
+y archivado — ver
 [Matriz de amenazas no-git](#matriz-de-amenazas-no-git-p4) más abajo). Ver
 [Alcance](#alcance-p0p4-este-repositorio) y
 [Fuera de alcance](#fuera-de-alcance--no-implementado-aquí) más abajo para
@@ -41,7 +41,7 @@ más abajo para el detalle exacto de cada modo.
 | P1 — hook en modo shadow | El adaptador de hook `PreToolUse` de Claude Code (`claude-code-hook/index.ts`), que conecta allowlist → severidad → evaluadores → consenso → veredicto → auditoría en un solo pipeline, corriendo en `MAGI_MODE=shadow`. |
 | P2 — calibración + harness de divergencia | Un corpus de calibración local basado en juicio humano (`src/calibration/corpus.ts`), recuperación léxica determinística de ejemplares (`src/calibration/selector.ts`), y un harness de divergencia (`src/calibration/divergence-harness.ts`) que demuestra que las tres facetas evaluadoras realmente discrepan en fixtures diseñados para divergir y coinciden en los controles — detectando colapso cosmético de persona. |
 | P3 — modo enforcing + anulación humana auditada | `MAGI_MODE=enforced` efectivamente bloquea un veredicto `deny` a través del contrato documentado `hookSpecificOutput` de Claude Code, y `magi audit override <hash> --reason "<why>"` permite que un operador documente que un `deny` registrado debe ser descartado, sin mutar la cadena de auditoría. |
-| P4 — extensión de la matriz de amenazas no-git | Una tabla `NON_GIT_RULES` en el clasificador de severidad (`src/gating/severity.ts`) que cubre 8 familias de comandos destructivos más allá de `git`, además de una corrección en el dispatch para que los comandos prefijados con `sudo`/`doas` ya no eludan la matriz de amenazas. Implementado y commiteado (`045ce2f`); pendiente de `sdd-verify`/`sdd-archive` formal — ver [Matriz de amenazas no-git](#matriz-de-amenazas-no-git-p4) más abajo. |
+| P4 — extensión de la matriz de amenazas no-git | Una tabla `NON_GIT_RULES` en el clasificador de severidad (`src/gating/severity.ts`) que cubre 8 familias de comandos destructivos más allá de `git`, además de una corrección en el dispatch para que los comandos prefijados con `sudo`/`doas` ya no eludan la matriz de amenazas. Verificado (`sdd-verify`: PASS WITH WARNINGS, 0 críticos) y archivado — ver [Matriz de amenazas no-git](#matriz-de-amenazas-no-git-p4) más abajo. |
 
 Tres evaluadores independientes respaldan cada acción gateada no trivial:
 
@@ -186,11 +186,16 @@ ejemplo `sudo rm -rf /`) antes eludían *toda* la matriz de amenazas
 ejecutable — el dispatch ahora normaliza más allá del wrapper sudo/doas
 antes de clasificar.
 
-Este trabajo está implementado y commiteado (`045ce2f` en `master`, sobre
-la base P0–P3), con la suite de tests completa pasando (394/394), pero
-**aún no** ha pasado por `sdd-verify`/`sdd-archive` — tratarlo como
-implementado y pendiente de verificación y archivo formal, no cerrado por
-completo como P0–P3.
+Este trabajo está implementado, verificado y archivado (`045ce2f` en
+`master`, sobre la base P0–P3; `a874dd7` corrige un gap en el tier de
+`dd` que `sdd-verify` detectó contra el spec aprobado — un `dd` que no
+escribe a un dispositivo ahora escala correctamente a `high` en vez de
+caer en `low`), con la suite de tests completa pasando (395/395). El
+veredicto final de `sdd-verify` es PASS WITH WARNINGS: 0 hallazgos
+críticos, 1 warning no bloqueante (falta un test negativo literal para
+`python3 script.py` en la regla de intérprete sin argumentos), 1
+sugerencia cosmética (un desajuste de conteo de escenarios en el spec)
+— ninguno bloquea la corrección funcional.
 
 ## Fuera de alcance — NO implementado aquí
 
