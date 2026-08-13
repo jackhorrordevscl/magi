@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { spawnSync } from 'node:child_process';
-import { runHook, normalizeToProposedAction } from '../../claude-code-hook/index.ts';
+import { runHook, normalizeToProposedAction, buildBlockReason, capReason } from '../../claude-code-hook/index.ts';
 import type { ClaudeCodeHookInput } from '../../claude-code-hook/index.ts';
 import { FsAppendAuditSink } from '../../src/audit/fs-append-sink.ts';
 import type { AuditRecord } from '../../src/audit/record.ts';
@@ -121,26 +121,29 @@ describe('runHook — trivial-scope allowlist short-circuit', () => {
     assert.equal(outcome.allow, true);
     assert.equal(outcome.trivial, true);
     assert.equal(outcome.verdict, null);
+    assert.equal(outcome.record, null);
     assert.equal(melchiorSpy.calls.length, 0);
     assert.equal(balthasarSpy.calls.length, 0);
     assert.equal(casperSpy.calls.length, 0);
     assert.deepEqual(readDayFileRecords(dir, now), []);
   });
 
-  test('a trivial git log Bash action short-circuits identically', async () => {
+  test('a trivial action short-circuits identically even under enforced mode', async () => {
     const dir = tmpAuditDir();
     const auditSink = new FsAppendAuditSink(dir);
     const melchiorSpy = countingEvaluator('melchior', 'allow');
     const now = new Date('2026-08-12T10:00:00.000Z');
 
-    const action = normalizeToProposedAction({ tool_name: 'Bash', tool_input: { command: 'git log' } }, 'shadow');
+    const action = normalizeToProposedAction({ tool_name: 'Bash', tool_input: { command: 'git log' } }, 'enforced');
     const outcome = await runHook(action, {
       auditSink,
       now,
       evaluators: [melchiorSpy.evaluator, melchiorSpy.evaluator, melchiorSpy.evaluator],
     });
 
+    assert.equal(outcome.allow, true);
     assert.equal(outcome.trivial, true);
+    assert.equal(outcome.record, null);
     assert.equal(melchiorSpy.calls.length, 0);
     assert.deepEqual(readDayFileRecords(dir, now), []);
   });
@@ -174,6 +177,7 @@ describe('runHook — shadow mode NEVER blocks, regardless of the computed verdi
     assert.equal(outcome.trivial, false);
     assert.equal(outcome.verdict?.severity, 'critical');
     assert.equal(outcome.verdict?.decision, 'deny', 'the recorded verdict must genuinely reflect the real decision');
+    assert.ok(outcome.record, 'the verdict must still be durably recorded even though shadow mode never blocks');
   });
 
   test('a low-severity action with 2-of-3 allow is recorded allow and still returned as allow', async () => {
@@ -192,6 +196,128 @@ describe('runHook — shadow mode NEVER blocks, regardless of the computed verdi
 
     assert.equal(outcome.allow, true);
     assert.equal(outcome.verdict?.decision, 'allow');
+  });
+});
+
+describe('runHook — enforcing mode blocks deny verdicts (mode x decision x trivial matrix)', () => {
+  const denyEvaluator = (name: Vote['evaluator']): EvaluatorPort => ({
+    name,
+    async castVote(): Promise<Vote> {
+      return { evaluator: name, vote: 'deny', rationale: `${name}-deny-for-test` };
+    },
+  });
+  const allowEvaluator = (name: Vote['evaluator']): EvaluatorPort => ({
+    name,
+    async castVote(): Promise<Vote> {
+      return { evaluator: name, vote: 'allow', rationale: `${name}-allow-for-test` };
+    },
+  });
+
+  test('enforced mode + deny verdict -> allow:false, verdict/record still populated', async () => {
+    const dir = tmpAuditDir();
+    const auditSink = new FsAppendAuditSink(dir);
+    const now = new Date('2026-08-12T10:00:00.000Z');
+
+    const action = normalizeToProposedAction(
+      { tool_name: 'Bash', tool_input: { command: 'git push --force origin main' } },
+      'enforced',
+    );
+    const outcome = await runHook(action, {
+      auditSink,
+      now,
+      evaluators: [denyEvaluator('melchior'), denyEvaluator('balthasar'), denyEvaluator('casper')],
+    });
+
+    assert.equal(outcome.allow, false, 'enforced mode must block a genuine deny verdict');
+    assert.equal(outcome.trivial, false);
+    assert.equal(outcome.verdict?.decision, 'deny');
+    assert.ok(outcome.record, 'the blocked action must still be durably audited');
+    assert.equal(outcome.record?.decision, 'deny');
+  });
+
+  test('enforced mode + allow verdict -> allow:true, identical to shadow mode', async () => {
+    const dir = tmpAuditDir();
+    const auditSink = new FsAppendAuditSink(dir);
+    const now = new Date('2026-08-12T10:00:00.000Z');
+
+    const action = normalizeToProposedAction({ tool_name: 'Bash', tool_input: { command: 'npm install' } }, 'enforced');
+    const outcome = await runHook(action, {
+      auditSink,
+      now,
+      evaluators: [allowEvaluator('melchior'), allowEvaluator('balthasar'), allowEvaluator('casper')],
+    });
+
+    assert.equal(outcome.allow, true);
+    assert.equal(outcome.verdict?.decision, 'allow');
+  });
+
+  test('an evaluator abstain that resolves to a consensus deny still blocks under enforcement (fail-closed)', async () => {
+    const dir = tmpAuditDir();
+    const auditSink = new FsAppendAuditSink(dir);
+    const now = new Date('2026-08-12T10:00:00.000Z');
+
+    const abstainEvaluator = (name: Vote['evaluator']): EvaluatorPort => ({
+      name,
+      async castVote(): Promise<Vote> {
+        return { evaluator: name, vote: 'abstain', rationale: `${name}-abstain-for-test` };
+      },
+    });
+
+    const action = normalizeToProposedAction({ tool_name: 'Write', tool_input: { file_path: 'notes.md' } }, 'enforced');
+    const outcome = await runHook(action, {
+      auditSink,
+      now,
+      evaluators: [abstainEvaluator('melchior'), abstainEvaluator('balthasar'), abstainEvaluator('casper')],
+    });
+
+    assert.equal(outcome.verdict?.decision, 'deny', 'abstain never counts toward allow — consensus resolves to deny');
+    assert.equal(outcome.allow, false, 'a real abstain signal blocks under enforcement, unlike an adapter exception');
+  });
+});
+
+describe('buildBlockReason — full evaluator rationale + audit hash', () => {
+  test('includes all three evaluator rationales, the action, and the audit hash', () => {
+    const verdict = {
+      actor: 'test-actor',
+      mode: 'enforced' as const,
+      action: 'git push --force origin main',
+      severity: 'critical' as const,
+      votes: [
+        { evaluator: 'melchior' as const, vote: 'deny' as const, rationale: 'melchior sees a contradiction' },
+        { evaluator: 'balthasar' as const, vote: 'deny' as const, rationale: 'balthasar flags blast radius' },
+        { evaluator: 'casper' as const, vote: 'abstain' as const, rationale: 'casper is unsure' },
+      ] as [Vote, Vote, Vote],
+      decision: 'deny' as const,
+      calibrationCorpusHash: '',
+      exemplarIds: [],
+    };
+
+    const reason = buildBlockReason(verdict.action, 'abc123hash', verdict);
+
+    assert.match(reason, /BLOCKED/);
+    assert.match(reason, /abc123hash/);
+    assert.match(reason, /git push --force origin main/);
+    assert.match(reason, /melchior sees a contradiction/);
+    assert.match(reason, /balthasar flags blast radius/);
+    assert.match(reason, /casper is unsure/);
+    assert.match(reason, /magi audit override abc123hash/);
+  });
+});
+
+describe('capReason — 10,000 character cap', () => {
+  test('reasons under the cap are returned unchanged', () => {
+    const short = 'magi: BLOCKED — short reason';
+    assert.equal(capReason(short), short);
+  });
+
+  test('reasons over the cap are truncated to exactly 10,000 chars, preserving the header at the start', () => {
+    const header = 'magi: BLOCKED — consensus deny (severity: critical)\nAction: x   Audit: abc123\n';
+    const longReason = header + 'x'.repeat(20_000);
+
+    const capped = capReason(longReason);
+
+    assert.equal(capped.length, 10_000);
+    assert.ok(capped.startsWith(header), 'the header must survive truncation, since truncation drops from the end');
   });
 });
 
@@ -225,8 +351,20 @@ describe('runHook — audit durability (record present on disk by the time runHo
   });
 });
 
+interface HookSpecificOutputJson {
+  hookSpecificOutput?: {
+    hookEventName?: string;
+    permissionDecision?: string;
+    permissionDecisionReason?: string;
+  };
+}
+
+function parseHookStdout(stdout: string): HookSpecificOutputJson {
+  return JSON.parse(stdout.trim().split('\n')[0] ?? '{}') as HookSpecificOutputJson;
+}
+
 describe('claude-code-hook binary — stdin/stdout/exit-code contract (spawned process)', () => {
-  test('a trivial Bash command is allowed via stdout decision:"allow" and exit code 0', () => {
+  test('a trivial Bash command is allowed via the hookSpecificOutput contract and exit code 0', () => {
     const result = spawnSync(process.execPath, [hookPath], {
       input: JSON.stringify({ tool_name: 'Bash', tool_input: { command: 'git log' } }),
       cwd: repoRoot,
@@ -236,11 +374,12 @@ describe('claude-code-hook binary — stdin/stdout/exit-code contract (spawned p
     });
 
     assert.equal(result.status, 0, `stderr: ${result.stderr}`);
-    const parsed = JSON.parse(result.stdout.trim().split('\n')[0] ?? '{}') as { decision: string };
-    assert.equal(parsed.decision, 'allow');
+    const parsed = parseHookStdout(result.stdout);
+    assert.equal(parsed.hookSpecificOutput?.hookEventName, 'PreToolUse');
+    assert.equal(parsed.hookSpecificOutput?.permissionDecision, 'allow');
   });
 
-  test('malformed stdin JSON still allows (shadow mode never blocks, even on adapter-side errors)', () => {
+  test('malformed stdin JSON still allows (fail-open, even on adapter-side errors), exit code 0', () => {
     const result = spawnSync(process.execPath, [hookPath], {
       input: 'not valid json {{{',
       cwd: repoRoot,
@@ -250,7 +389,56 @@ describe('claude-code-hook binary — stdin/stdout/exit-code contract (spawned p
     });
 
     assert.equal(result.status, 0, `stderr: ${result.stderr}`);
-    const parsed = JSON.parse(result.stdout.trim().split('\n')[0] ?? '{}') as { decision: string };
-    assert.equal(parsed.decision, 'allow');
+    const parsed = parseHookStdout(result.stdout);
+    assert.equal(parsed.hookSpecificOutput?.permissionDecision, 'allow');
+  });
+
+  test('MAGI_MODE=enforced + a deny verdict blocks via permissionDecision:"deny", exit code 0', () => {
+    const dir = tmpAuditDir();
+    // Deliberately strip ANTHROPIC_API_KEY so all three real evaluators fail
+    // fast and deterministically to `deny` (fail-closed, per
+    // src/gating/anthropic-evaluator.ts) with no network call required —
+    // this makes the deny verdict reproducible without a real API key. A
+    // dedicated tmp `cwd` keeps the resulting audit write out of the repo's
+    // own `.magi/audit/` directory.
+    const { ANTHROPIC_API_KEY: _unusedApiKey, ...envWithoutApiKey } = process.env;
+    const env = { ...envWithoutApiKey, MAGI_MODE: 'enforced' };
+
+    const result = spawnSync(process.execPath, [hookPath], {
+      input: JSON.stringify({ tool_name: 'Bash', tool_input: { command: 'git push --force origin main' } }),
+      cwd: dir,
+      encoding: 'utf8',
+      env,
+      timeout: 15000,
+    });
+
+    assert.equal(result.status, 0, `stderr: ${result.stderr}`);
+    const parsed = parseHookStdout(result.stdout);
+    assert.equal(parsed.hookSpecificOutput?.permissionDecision, 'deny');
+    assert.match(parsed.hookSpecificOutput?.permissionDecisionReason ?? '', /BLOCKED/);
+    assert.match(parsed.hookSpecificOutput?.permissionDecisionReason ?? '', /magi audit override/);
+  });
+
+  test('MAGI_MODE unset defaults to shadow — a deny-verdict scenario is still allowed, exit code 0', () => {
+    const dir = tmpAuditDir();
+    // Same fail-closed-to-deny setup as the enforced-mode test above (strip
+    // ANTHROPIC_API_KEY so all three real evaluators deny deterministically),
+    // but this time MAGI_MODE itself is deleted from the child env entirely
+    // (not set to 'shadow' — genuinely absent) to prove resolveMode() falls
+    // through to 'shadow' by default and shadow mode never blocks, even on
+    // a deny verdict.
+    const { ANTHROPIC_API_KEY: _unusedApiKey, MAGI_MODE: _unusedMode, ...envWithoutModeOrApiKey } = process.env;
+
+    const result = spawnSync(process.execPath, [hookPath], {
+      input: JSON.stringify({ tool_name: 'Bash', tool_input: { command: 'git push --force origin main' } }),
+      cwd: dir,
+      encoding: 'utf8',
+      env: envWithoutModeOrApiKey,
+      timeout: 15000,
+    });
+
+    assert.equal(result.status, 0, `stderr: ${result.stderr}`);
+    const parsed = parseHookStdout(result.stdout);
+    assert.equal(parsed.hookSpecificOutput?.permissionDecision, 'allow');
   });
 });

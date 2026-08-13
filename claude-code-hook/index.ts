@@ -9,18 +9,23 @@ import { balthasar } from '../src/gating/balthasar.ts';
 import { casper } from '../src/gating/casper.ts';
 import { FsAppendAuditSink } from '../src/audit/fs-append-sink.ts';
 import { MagiModeSchema } from '../src/gating/proposed-action.ts';
+import type { AuditRecord } from '../src/audit/record.ts';
 import type { AuditSink } from '../src/audit/audit-sink.ts';
 import type { EvaluatorPort } from '../src/gating/evaluator-port.ts';
+import type { Vote } from '../src/gating/consensus.ts';
 import type { MagiMode, ProposedAction } from '../src/gating/proposed-action.ts';
 import type { Verdict } from '../src/gating/verdict.ts';
 
 /**
- * Claude Code `PreToolUse` hook adapter, running in `MAGI_MODE=shadow`
- * (the only mode this PR wires up — see the note on `runHook` below).
+ * Claude Code `PreToolUse` hook adapter — resolves `mode` from `MAGI_MODE`
+ * (`shadow` or `enforced`, see `resolveMode` below) and actually enforces a
+ * `deny` verdict once `mode === 'enforced'` (per `sdd/magi-p3-enforcing-
+ * override/design`, decisions #1/#2/#6/#7).
  *
  * Pipeline order (per `sdd/magi/tasks` Phase 9): trivial-scope allowlist
  * short-circuit -> severity classification -> evaluators in parallel ->
- * consensus/verdict assembly -> durable audit sink append.
+ * consensus/verdict assembly -> durable audit sink append -> enforcing-mode
+ * gate.
  *
  * This file has two layers, matching the separation already established
  * by `src/audit/verify.ts` and `src/cli/calibrate.ts`:
@@ -129,38 +134,42 @@ export interface RunHookOptions {
 
 export interface HookOutcome {
   /**
-   * Always `true` in this PR: `MAGI_MODE=shadow` never blocks, regardless
-   * of the computed verdict's decision. `MAGI_MODE=enforced` is a valid
-   * `ProposedAction.mode` value (accepted for forward-compatible audit
-   * records), but actually enforcing a `deny` verdict is explicitly out of
-   * this PR's scope — deferred to a later PR per `sdd/magi/design`'s P4
-   * rollout. See the `runHook` doc comment below.
+   * `false` only when `action.mode === 'enforced'` AND the computed
+   * verdict's `decision === 'deny'` — every other combination (shadow mode,
+   * any allow verdict, or the trivial short-circuit) allows. See design
+   * decision #6 (failure asymmetry): an evaluator `abstain` folding into a
+   * consensus `deny` DOES block under enforcement (fail-closed — a real
+   * signal), while an adapter-side exception never reaches this function at
+   * all and is handled as fail-open in `main()` below.
    */
-  allow: true;
+  allow: boolean;
   /** True when the action was resolved via the trivial-scope allowlist short-circuit — evaluators/audit were never invoked. */
   trivial: boolean;
   /** The full computed verdict, or `null` when the trivial short-circuit applied (no verdict is computed for trivial actions). */
   verdict: Verdict | null;
+  /** The audit record `auditSink.append()` returned, or `null` when the trivial short-circuit applied (no record is ever written for trivial actions). Supplies the hash the block reason and the `magi audit override` hint need. */
+  record: AuditRecord | null;
 }
 
 /**
  * Runs the full MAGI gating pipeline for one proposed action: trivial-scope
  * allowlist short-circuit -> severity classification -> evaluators
  * (parallel, via `collectVotes`) -> consensus/verdict assembly -> durable
- * audit sink append.
+ * audit sink append -> enforcing-mode gate.
  *
- * Per `sdd/magi/tasks` Phase 9 (`MAGI_MODE=shadow` is the only mode this PR
- * wires up): the action is ALWAYS allowed, regardless of the computed
- * verdict's decision. The verdict is nevertheless ALWAYS durably recorded
- * to the audit sink FIRST — `auditSink.append()` is awaited-through (it is
+ * The verdict is ALWAYS durably recorded to the audit sink FIRST,
+ * regardless of mode — `auditSink.append()` is awaited-through (it is
  * itself synchronous and already durable-before-return, per
- * `src/audit/fs-append-sink.ts`) before this function resolves. See
- * `tests/claude-code-hook/index.test.ts` for the RED tests proving both
- * properties independently.
+ * `src/audit/fs-append-sink.ts`) before this function resolves. Only AFTER
+ * that durable write does this function compute `allow` from `action.mode`
+ * + `verdict.decision` (design decision #2: mode is read once by `main()`
+ * and threaded through on `ProposedAction`, so `runHook` itself stays pure
+ * and table-testable). See `tests/claude-code-hook/index.test.ts` for the
+ * RED tests proving these properties independently.
  */
 export async function runHook(action: ProposedAction, options: RunHookOptions = {}): Promise<HookOutcome> {
   if (isTrivial(action)) {
-    return { allow: true, trivial: true, verdict: null };
+    return { allow: true, trivial: true, verdict: null, record: null };
   }
 
   const evaluators = options.evaluators ?? DEFAULT_EVALUATORS;
@@ -174,10 +183,14 @@ export async function runHook(action: ProposedAction, options: RunHookOptions = 
   // Durable audit write BEFORE returning — `FsAppendAuditSink.append()` is
   // itself synchronous (write + fsync complete before it returns), so
   // awaiting nothing further here is what guarantees the record is on disk
-  // before this function's promise resolves.
-  auditSink.append(verdict, now);
+  // before this function's promise resolves. This happens unconditionally,
+  // in both modes — enforcing mode changes what `main()` tells Claude Code,
+  // never whether the action gets audited.
+  const record = auditSink.append(verdict, now);
 
-  return { allow: true, trivial: false, verdict };
+  const allow = !(action.mode === 'enforced' && verdict.decision === 'deny');
+
+  return { allow, trivial: false, verdict, record };
 }
 
 // --- Process-level entrypoint: stdin JSON in, stdout JSON + exit code out ---
@@ -200,14 +213,75 @@ function resolveMode(): MagiMode {
   return parsed.success ? parsed.data : 'shadow';
 }
 
-function writeDecision(reason: string): void {
-  process.stdout.write(`${JSON.stringify({ decision: 'allow', reason })}\n`);
+/** `permissionDecisionReason` values are capped at this length before being written to stdout (see the Interfaces/Contracts section of `sdd/magi-p3-enforcing-override/design`). */
+const MAX_REASON_LENGTH = 10_000;
+
+/**
+ * Caps `reason` at `MAX_REASON_LENGTH` characters. Truncation always drops
+ * from the END of the string, never the start — `buildBlockReason` puts its
+ * header (BLOCKED line, action, audit hash, override hint) FIRST specifically
+ * so those fields survive truncation even when the evaluator rationales that
+ * follow are long enough to be cut off.
+ */
+export function capReason(reason: string): string {
+  return reason.length > MAX_REASON_LENGTH ? reason.slice(0, MAX_REASON_LENGTH) : reason;
+}
+
+/**
+ * Emits Claude Code's documented `PreToolUse` hook output contract — for
+ * BOTH `allow` and `deny` (design decision #1: this replaces the previous
+ * non-contractual `{decision:'allow',reason}` shape outright, it is not kept
+ * as a second shape). Exit code is never derived from `decision` — see
+ * `main()` and design decision #7 (JSON is the sole authority; exit code
+ * always stays `0`).
+ */
+function writeHookOutput(decision: 'allow' | 'deny', reason: string): void {
+  process.stdout.write(
+    `${JSON.stringify({
+      hookSpecificOutput: {
+        hookEventName: 'PreToolUse',
+        permissionDecision: decision,
+        permissionDecisionReason: capReason(reason),
+      },
+    })}\n`,
+  );
+}
+
+function formatVoteLine(vote: Vote | undefined): string {
+  if (!vote) return '';
+  return `${vote.evaluator.toUpperCase()} — ${vote.vote}: ${vote.rationale}`;
+}
+
+/**
+ * Assembles the block reason for an enforcing-mode deny, per spec
+ * Requirement: Block Includes Full Evaluator Rationale — the reason MUST
+ * include each evaluator's individual verdict and rationale, not just an
+ * aggregate decision and pointer. The header line comes first (design's
+ * fixed template) so the audit hash and override hint always survive
+ * `capReason`'s truncation even when the rationales below are long.
+ */
+export function buildBlockReason(action: string, hash: string, verdict: Verdict): string {
+  const findVote = (name: Vote['evaluator']): Vote | undefined =>
+    verdict.votes.find((v) => v.evaluator === name);
+
+  const lines = [
+    `magi: BLOCKED — consensus deny (severity: ${verdict.severity})`,
+    `Action: ${action}   Audit: ${hash}`,
+    `Override: magi audit override ${hash} --reason "<why>"`,
+    '',
+    formatVoteLine(findVote('melchior')),
+    formatVoteLine(findVote('balthasar')),
+    formatVoteLine(findVote('casper')),
+  ];
+  return lines.join('\n');
 }
 
 /**
  * The real `PreToolUse` hook entrypoint: reads the hook payload from
- * stdin, runs the gating pipeline, and always prints an `allow` decision
- * (shadow mode). Returns the process exit code (always `0` in this PR)
+ * stdin, runs the gating pipeline, and prints the documented
+ * `hookSpecificOutput` contract — `deny` only when `mode === 'enforced'`
+ * and the verdict is `deny`, `allow` otherwise. Returns the process exit
+ * code (always `0`, per design decision #7 — JSON is the sole authority)
  * rather than calling `process.exit` itself, so it stays testable without
  * spawning a process (the spawn-based tests in
  * `tests/claude-code-hook/index.test.ts` additionally prove the real
@@ -220,9 +294,10 @@ export async function main(): Promise<number> {
   try {
     hookInput = JSON.parse(raw) as ClaudeCodeHookInput;
   } catch (error) {
-    // A malformed hook payload is OUR OWN adapter-side problem, not a
-    // reason to ever block Claude Code in shadow mode.
-    writeDecision(`magi: malformed hook input, allowed (shadow mode): ${describeError(error)}`);
+    // A malformed hook payload is OUR OWN adapter-side problem — an adapter
+    // exception is always fail-open (design decision #6), regardless of
+    // mode. It never reaches the mode/decision gate in `runHook`.
+    writeHookOutput('allow', `magi: malformed hook input, allowed (fail-open): ${describeError(error)}`);
     return 0;
   }
 
@@ -231,17 +306,40 @@ export async function main(): Promise<number> {
     const action = normalizeToProposedAction(hookInput, mode);
     const outcome = await runHook(action);
 
-    const reason = outcome.trivial
-      ? 'magi: trivial-scope allowlisted, not gated'
-      : `magi: shadow mode — verdict "${outcome.verdict?.decision ?? 'unknown'}" recorded, action allowed`;
-    writeDecision(reason);
+    if (outcome.trivial) {
+      writeHookOutput('allow', 'magi: trivial-scope allowlisted, not gated');
+      return 0;
+    }
+
+    const verdict = outcome.verdict;
+    if (!verdict) {
+      // Defensive only: every non-trivial outcome carries a verdict by
+      // construction (see `runHook`) — this branch should be unreachable.
+      // Fail-open rather than ever throwing a block from an inconsistent
+      // internal state.
+      writeHookOutput('allow', 'magi: internal error, allowed (fail-open): missing verdict');
+      return 0;
+    }
+
+    if (!outcome.allow) {
+      const hash = outcome.record?.hash ?? 'unknown';
+      writeHookOutput('deny', buildBlockReason(verdict.action, hash, verdict));
+      return 0;
+    }
+
+    const reason =
+      mode === 'enforced'
+        ? `magi: verdict "${verdict.decision}" recorded, action allowed`
+        : `magi: shadow mode — verdict "${verdict.decision}" recorded, action allowed`;
+    writeHookOutput('allow', reason);
     return 0;
   } catch (error) {
     // Even a genuine internal failure (e.g. audit sink write error) must
-    // not block Claude Code in shadow mode — always allow, but surface the
+    // never block Claude Code — an adapter-side exception is always
+    // fail-open (design decision #6), regardless of mode. Surface the
     // failure on stderr for operator visibility.
-    process.stderr.write(`magi: internal error, allowed (shadow mode): ${describeError(error)}\n`);
-    writeDecision('magi: internal error, allowed (shadow mode)');
+    process.stderr.write(`magi: internal error, allowed (fail-open): ${describeError(error)}\n`);
+    writeHookOutput('allow', 'magi: internal error, allowed (fail-open)');
     return 0;
   }
 }
@@ -255,8 +353,8 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   main()
     .then((code) => process.exit(code))
     .catch((error) => {
-      process.stderr.write(`magi: unhandled internal error, allowed (shadow mode): ${describeError(error)}\n`);
-      writeDecision('magi: unhandled internal error, allowed (shadow mode)');
+      process.stderr.write(`magi: unhandled internal error, allowed (fail-open): ${describeError(error)}\n`);
+      writeHookOutput('allow', 'magi: unhandled internal error, allowed (fail-open)');
       process.exit(0);
     });
 }
