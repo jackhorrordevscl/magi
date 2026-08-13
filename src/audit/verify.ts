@@ -1,7 +1,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { AUDIT_GENESIS_SEQ, AuditRecordSchema, computeHash } from './record.ts';
-import type { AuditRecord } from './record.ts';
+import { AUDIT_GENESIS_SEQ, ChainRecordSchema, computeHash } from './record.ts';
+import type { ChainRecord } from './record.ts';
+import { listDayFiles } from './read-chain.ts';
 
 export interface VerifyResult {
   valid: boolean;
@@ -38,9 +39,9 @@ export function verifyChain(auditDir: string): VerifyResult {
       .filter((line) => line.trim().length > 0);
 
     for (const line of lines) {
-      let record: AuditRecord;
+      let record: ChainRecord;
       try {
-        record = AuditRecordSchema.parse(JSON.parse(line));
+        record = ChainRecordSchema.parse(JSON.parse(line));
       } catch {
         return { valid: false, brokenAtSeq: expectedSeq, reason: 'malformed or schema-invalid record' };
       }
@@ -64,12 +65,4 @@ export function verifyChain(auditDir: string): VerifyResult {
   }
 
   return { valid: true };
-}
-
-function listDayFiles(auditDir: string): string[] {
-  if (!fs.existsSync(auditDir)) return [];
-  return fs
-    .readdirSync(auditDir)
-    .filter((name) => name.endsWith('.jsonl'))
-    .sort();
 }

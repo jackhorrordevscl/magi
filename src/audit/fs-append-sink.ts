@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { AUDIT_GENESIS_SEQ, AuditRecordSchema, computeHash } from './record.ts';
-import type { AuditRecord } from './record.ts';
+import { AUDIT_GENESIS_SEQ, AuditRecordSchema, OverrideRecordSchema, computeHash } from './record.ts';
+import type { AuditRecord, ChainContent, OverrideRecord } from './record.ts';
 import type { AuditSink } from './audit-sink.ts';
 import type { Verdict } from '../gating/verdict.ts';
 
@@ -40,6 +40,74 @@ export class FsAppendAuditSink implements AuditSink {
   }
 
   append(verdict: Verdict, now: Date): AuditRecord {
+    return this.appendRecord<AuditRecord>(
+      (seq, timestamp) => ({
+        seq,
+        timestamp,
+        actor: verdict.actor,
+        mode: verdict.mode,
+        action: verdict.action,
+        severity: verdict.severity,
+        votes: verdict.votes,
+        decision: verdict.decision,
+        calibrationCorpusHash: verdict.calibrationCorpusHash,
+        exemplarIds: verdict.exemplarIds,
+      }),
+      AuditRecordSchema,
+      now,
+    );
+  }
+
+  /**
+   * Appends a human-override record referencing an earlier deny record by
+   * hash/seq. Lives on `FsAppendAuditSink` only (not the `AuditSink` port —
+   * see design decision #5): the hook adapter never overrides, only the
+   * `magi audit override` CLI does (`src/cli/audit-override.ts`, PR3).
+   *
+   * `mode` is hardcoded to `'enforced'` here rather than accepted as an
+   * input: an override is only ever operationally meaningful for a deny
+   * that actually blocked something, which only happens under enforced
+   * mode (see spec `audited-human-override` — shadow-mode denies never
+   * block, so there is nothing for an operator to override).
+   */
+  appendOverride(
+    input: { targetHash: string; targetSeq: number; actor: string; reason: string },
+    now: Date,
+  ): OverrideRecord {
+    return this.appendRecord<OverrideRecord>(
+      (seq, timestamp) => ({
+        seq,
+        timestamp,
+        actor: input.actor,
+        mode: 'enforced',
+        override: {
+          targetHash: input.targetHash,
+          targetSeq: input.targetSeq,
+          reason: input.reason,
+        },
+      }),
+      OverrideRecordSchema,
+      now,
+    );
+  }
+
+  /**
+   * Shared chain-append bookkeeping: reads HEAD to derive the next `seq`/
+   * `prevHash`, handles day-rollover sealing, computes the durable
+   * timestamp, hashes and validates the record via `schema`, then durably
+   * writes both the day-file line and the HEAD pointer (write + fsync,
+   * both BEFORE returning) — byte-identical for every record kind, so the
+   * chain can never fork depending on which record kind was appended.
+   *
+   * `buildContent` receives the derived `seq`/`timestamp` and returns the
+   * record's full content minus `hash`/`prevHash`, in the shape of
+   * whichever chain record kind `T` is (`AuditRecord` or `OverrideRecord`).
+   */
+  private appendRecord<T extends AuditRecord | OverrideRecord>(
+    buildContent: (seq: number, timestamp: string) => Omit<T, 'hash' | 'prevHash'>,
+    schema: { parse: (input: unknown) => T },
+    now: Date,
+  ): T {
     fs.mkdirSync(this.auditDir, { recursive: true });
 
     const head = this.readHead();
@@ -51,23 +119,16 @@ export class FsAppendAuditSink implements AuditSink {
     }
 
     const timestamp = now.toISOString();
-    const contentWithoutHash: Omit<AuditRecord, 'hash' | 'prevHash'> = {
-      seq,
-      timestamp,
-      actor: verdict.actor,
-      mode: verdict.mode,
-      action: verdict.action,
-      severity: verdict.severity,
-      votes: verdict.votes,
-      decision: verdict.decision,
-      calibrationCorpusHash: verdict.calibrationCorpusHash,
-      exemplarIds: verdict.exemplarIds,
-    };
-    const hash = computeHash(contentWithoutHash, prevHash);
-    const record: AuditRecord = AuditRecordSchema.parse({ ...contentWithoutHash, prevHash, hash });
+    const contentWithoutHash = buildContent(seq, timestamp);
+    // Sound but unprovable to TS: each concrete call site (append/appendOverride)
+    // builds content matching exactly one arm of ChainContent — see the type's
+    // own doc comment in record.ts for why generic inference can't confirm this.
+    const hash = computeHash(contentWithoutHash as ChainContent, prevHash);
+    const record = schema.parse({ ...contentWithoutHash, prevHash, hash });
 
-    this.appendDurably(`${utcDateString(now)}.jsonl`, `${JSON.stringify(record)}\n`);
-    this.writeHeadDurably({ seq, hash, date: utcDateString(now) });
+    const dateStr = utcDateString(now);
+    this.appendDurably(`${dateStr}.jsonl`, `${JSON.stringify(record)}\n`);
+    this.writeHeadDurably({ seq, hash, date: dateStr });
 
     return record;
   }

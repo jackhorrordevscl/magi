@@ -4,8 +4,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { FsAppendAuditSink } from '../../src/audit/fs-append-sink.ts';
-import { computeHash, AUDIT_GENESIS_SEQ } from '../../src/audit/record.ts';
-import type { AuditRecord } from '../../src/audit/record.ts';
+import { computeHash, AUDIT_GENESIS_SEQ, ChainRecordSchema } from '../../src/audit/record.ts';
+import type { AuditRecord, ChainRecord } from '../../src/audit/record.ts';
 import type { Verdict } from '../../src/gating/verdict.ts';
 
 function tmpAuditDir(): string {
@@ -210,5 +210,103 @@ describe('FsAppendAuditSink — day rollover', () => {
     sink.append(verdict(), now);
     const filePath = path.join(dir, '2026-08-12.jsonl');
     assert.equal((fs.statSync(filePath).mode & 0o200) !== 0, true);
+  });
+});
+
+function readDayFileChainRecords(auditDir: string, date: Date): ChainRecord[] {
+  const fileName = `${date.toISOString().slice(0, 10)}.jsonl`;
+  const filePath = path.join(auditDir, fileName);
+  return fs
+    .readFileSync(filePath, 'utf8')
+    .split('\n')
+    .filter((line) => line.trim().length > 0)
+    .map((line) => ChainRecordSchema.parse(JSON.parse(line)));
+}
+
+describe('FsAppendAuditSink — appendOverride', () => {
+  test('appendOverride continues the SAME chain as append (seq/prevHash bookkeeping shared)', () => {
+    const dir = tmpAuditDir();
+    const sink = new FsAppendAuditSink(dir);
+    const now = new Date('2026-08-12T10:00:00.000Z');
+
+    const verdictRecord = sink.append(verdict({ decision: 'deny' }), now);
+    const overrideRecord = sink.appendOverride(
+      { targetHash: verdictRecord.hash, targetSeq: verdictRecord.seq, actor: 'operator', reason: 'verified manually' },
+      now,
+    );
+
+    assert.equal(overrideRecord.seq, verdictRecord.seq + 1);
+    assert.equal(overrideRecord.prevHash, verdictRecord.hash);
+    assert.equal(overrideRecord.override.targetHash, verdictRecord.hash);
+    assert.equal(overrideRecord.override.targetSeq, verdictRecord.seq);
+    assert.equal(overrideRecord.override.reason, 'verified manually');
+  });
+
+  test("appendOverride's hash is independently reproducible via computeHash(content, prevHash)", () => {
+    const dir = tmpAuditDir();
+    const sink = new FsAppendAuditSink(dir);
+    const now = new Date('2026-08-12T10:00:00.000Z');
+
+    const verdictRecord = sink.append(verdict({ decision: 'deny' }), now);
+    const overrideRecord = sink.appendOverride(
+      { targetHash: verdictRecord.hash, targetSeq: verdictRecord.seq, actor: 'operator', reason: 'ok' },
+      now,
+    );
+
+    const { hash, prevHash, ...content } = overrideRecord;
+    assert.equal(computeHash(content, prevHash), hash);
+  });
+
+  test('HEAD tracks the override record after it becomes the latest chain entry', () => {
+    const dir = tmpAuditDir();
+    const sink = new FsAppendAuditSink(dir);
+    const now = new Date('2026-08-12T10:00:00.000Z');
+
+    const verdictRecord = sink.append(verdict({ decision: 'deny' }), now);
+    const overrideRecord = sink.appendOverride(
+      { targetHash: verdictRecord.hash, targetSeq: verdictRecord.seq, actor: 'operator', reason: 'ok' },
+      now,
+    );
+
+    const head = JSON.parse(fs.readFileSync(path.join(dir, 'HEAD'), 'utf8')) as { seq: number; hash: string };
+    assert.equal(head.seq, overrideRecord.seq);
+    assert.equal(head.hash, overrideRecord.hash);
+  });
+
+  test('appendOverride triggers day rollover identically to append', () => {
+    const dir = tmpAuditDir();
+    const sink = new FsAppendAuditSink(dir);
+    const day1 = new Date('2026-08-12T23:59:00.000Z');
+    const day2 = new Date('2026-08-13T00:05:00.000Z');
+
+    const verdictRecord = sink.append(verdict({ decision: 'deny' }), day1);
+    const day1FilePath = path.join(dir, '2026-08-12.jsonl');
+    assert.equal((fs.statSync(day1FilePath).mode & 0o200) !== 0, true, 'day1 file writable before rollover');
+
+    sink.appendOverride(
+      { targetHash: verdictRecord.hash, targetSeq: verdictRecord.seq, actor: 'operator', reason: 'ok' },
+      day2,
+    );
+
+    const mode = fs.statSync(day1FilePath).mode;
+    assert.equal((mode & 0o200) === 0, true, 'day1 file should have no owner-write bit after rollover');
+    assert.equal(fs.existsSync(path.join(dir, '2026-08-13.jsonl')), true);
+  });
+
+  test('a chain mixing verdict and override records round-trips through ChainRecordSchema', () => {
+    const dir = tmpAuditDir();
+    const sink = new FsAppendAuditSink(dir);
+    const now = new Date('2026-08-12T10:00:00.000Z');
+
+    const verdictRecord = sink.append(verdict({ decision: 'deny' }), now);
+    sink.appendOverride(
+      { targetHash: verdictRecord.hash, targetSeq: verdictRecord.seq, actor: 'operator', reason: 'ok' },
+      now,
+    );
+
+    const records = readDayFileChainRecords(dir, now);
+    assert.equal(records.length, 2);
+    assert.equal('override' in records[0]!, false);
+    assert.equal('override' in records[1]!, true);
   });
 });

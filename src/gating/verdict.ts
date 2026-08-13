@@ -9,17 +9,15 @@ import type { ProposedAction, SeverityTier } from './proposed-action.ts';
  * severity classification + consensus resolution are combined — everything
  * except the audit sink's own chain bookkeeping (`seq`/`prevHash`/`hash`/
  * `timestamp`), which is only assigned once the record is actually
- * appended (see `src/audit/*`, PR2). `override` is likewise excluded: an
- * override is a distinct, later human action on an already-written record,
- * never produced by verdict assembly itself (the `--override-magi` CLI is
- * out of this PR's scope, deferred to a later PR).
+ * appended (see `src/audit/*`, PR2). Overrides are a distinct record kind
+ * entirely (`OverrideRecordSchema`, `src/audit/record.ts`) appended by a
+ * later, separate human action — never produced by verdict assembly.
  */
 export const VerdictSchema = AuditRecordSchema.omit({
   seq: true,
   prevHash: true,
   hash: true,
   timestamp: true,
-  override: true,
 });
 export type Verdict = z.infer<typeof VerdictSchema>;
 

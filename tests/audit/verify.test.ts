@@ -53,6 +53,35 @@ describe('verifyChain — untampered chain', () => {
 
     assert.deepEqual(verifyChain(dir), { valid: true });
   });
+
+  test('returns {valid: true} for a chain mixing verdict and override records', () => {
+    const dir = tmpAuditDir();
+    const sink = new FsAppendAuditSink(dir);
+    const now = new Date('2026-08-12T10:00:00.000Z');
+
+    const denyRecord = sink.append(verdict({ decision: 'deny' }), now);
+    sink.appendOverride(
+      { targetHash: denyRecord.hash, targetSeq: denyRecord.seq, actor: 'operator', reason: 'verified manually' },
+      now,
+    );
+    sink.append(verdict(), now);
+
+    assert.deepEqual(verifyChain(dir), { valid: true });
+  });
+
+  test('returns {valid: true} for a pre-P3 chain with no override records (regression guard for decision #3)', () => {
+    const dir = tmpAuditDir();
+    const sink = new FsAppendAuditSink(dir);
+    const now = new Date('2026-08-12T10:00:00.000Z');
+
+    for (let i = 0; i < 4; i++) sink.append(verdict(), now);
+
+    // Pre-P3 chains never contained an `override` key on any written
+    // record (no writer ever populated it, per design decision #3) — this
+    // asserts that switching `verifyChain` to `ChainRecordSchema` does not
+    // retroactively invalidate an untouched, override-free chain.
+    assert.deepEqual(verifyChain(dir), { valid: true });
+  });
 });
 
 describe('verifyChain — tampered chain detection', () => {
