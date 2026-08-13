@@ -12,7 +12,11 @@ This repository currently ships **v1, scope P0–P3**: deterministic gating
 core, hash-chained audit log with an audited human-override record kind, a
 Claude Code `PreToolUse` hook adapter supporting both **shadow** and
 **enforcing** mode, and a human-grounded calibration corpus + divergence
-harness. See [Scope](#scope-p0p3-this-repository) and
+harness. On top of that base, P4 extends the deterministic severity
+classifier with a non-git threat matrix (implemented and committed, pending
+formal verification and archive — see
+[Non-git threat matrix](#non-git-threat-matrix-p4) below). See
+[Scope](#scope-p0p4-this-repository) and
 [Out of scope](#out-of-scope--not-implemented-here) below for the precise
 boundary.
 
@@ -26,7 +30,7 @@ session, never a config-file default. See
 [Enforcing mode](#enforcing-mode-blocks-deny-verdicts--audited-human-override)
 below for exactly what each mode does.
 
-## Scope (P0–P3, this repository)
+## Scope (P0–P4, this repository)
 
 | Phase | What it delivers |
 |---|---|
@@ -34,6 +38,7 @@ below for exactly what each mode does.
 | P1 — shadow-mode hook | The Claude Code `PreToolUse` hook adapter (`claude-code-hook/index.ts`), wiring allowlist → severity → evaluators → consensus → verdict → audit into one pipeline, running in `MAGI_MODE=shadow`. |
 | P2 — calibration + divergence harness | A local, human-grounded calibration corpus (`src/calibration/corpus.ts`), deterministic lexical exemplar retrieval (`src/calibration/selector.ts`), and a divergence harness (`src/calibration/divergence-harness.ts`) that proves the three evaluator facets genuinely disagree on designed-divergent fixtures and agree on controls — catching cosmetic persona collapse. |
 | P3 — enforcing mode + audited human override | `MAGI_MODE=enforced` actually blocks a `deny` verdict via Claude Code's documented `hookSpecificOutput` contract, and `magi audit override <hash> --reason "<why>"` lets an operator document that a recorded deny should be disregarded without mutating the audit chain. |
+| P4 — non-git threat-matrix extension | A `NON_GIT_RULES` table in the severity classifier (`src/gating/severity.ts`) covering 8 destructive command families beyond `git`, plus a dispatch fix so `sudo`/`doas`-prefixed commands no longer bypass the threat matrix. Implemented and committed (`045ce2f`); pending formal `sdd-verify`/`sdd-archive` — see [Non-git threat matrix](#non-git-threat-matrix-p4) below. |
 
 Three independent evaluators back every non-trivial gated action:
 
@@ -150,6 +155,30 @@ every execution, every command the allowlist can't positively confirm as
 trivial — goes through the full severity/quorum pipeline with no
 exception.
 
+### Non-git threat matrix (P4)
+
+The deterministic severity classifier (`src/gating/severity.ts`) previously
+only had threat-matrix rules for the `git` executable — any other
+executable (`rm`, `dd`, `docker`, a SQL CLI, etc.) always classified as
+`low` severity regardless of how destructive the actual command was. A new
+`NON_GIT_RULES` table now covers 8 destructive command families: `rm -rf`,
+`dd` (device writes), `mkfs*`, `shred`, `chmod -R`/`chown -R` (broad
+permission changes), bare-interpreter pipe-to-shell proxy detection (e.g.
+`curl ... | sh`), destructive `docker` subcommands (`system prune -a
+--volumes`, `rmi -f`, `volume rm`), and destructive inline DB-CLI
+statements (`psql -c`/`mysql -e` containing `DROP`/`TRUNCATE`/an
+unqualified `DELETE`). A related fix in the same commit: `sudo`/`doas`-
+prefixed commands (e.g. `sudo rm -rf /`) previously bypassed the *entire*
+threat matrix (git rules included) because the parser reported `sudo` as
+the executable — dispatch now normalizes past the sudo/doas wrapper before
+classification.
+
+This work is implemented and committed (`045ce2f` on `master`, on top of
+the P0–P3 base), with the full test suite passing (394/394), but it has
+**not** yet gone through `sdd-verify`/`sdd-archive` — treat it as
+implemented and pending formal verification and archive, not fully closed
+like P0–P3.
+
 ## Out of scope — NOT implemented here
 
 The following are explicitly deferred to a future change, per
@@ -254,3 +283,15 @@ always fails open) reports `"allow"`.
   the enforcing-mode gate and the override record kind.
 - `docs/trivial-allowlist-scope.md` — the trivial-scope allowlist's
   confirmed boundary.
+
+## What's next — exploration in progress, not yet scoped
+
+An exploration (not a proposal, spec, design, or any code yet) has looked
+at a future two-part change: (a) a config-file layer letting each
+evaluator's model/backend/timeout be set via a config file instead of the
+hardcoded literals currently in `melchior.ts`/`balthasar.ts`/`casper.ts`,
+and (b) a terminal UI built on plain readline/ANSI — deliberately not a
+framework like `ink`/`blessed`, to keep the project's minimal-dependency
+convention — that would read/write that config and render `magi audit
+stats` interactively. Neither part is approved or scheduled; this is
+exploration-only, not a commitment.
