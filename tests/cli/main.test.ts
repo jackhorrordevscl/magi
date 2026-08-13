@@ -139,6 +139,78 @@ describe('runMain — audit stats', () => {
   });
 });
 
+describe('runMain — audit override', () => {
+  test('missing hash argument returns 1 with a usage message', async () => {
+    const { io, err } = capturingIO();
+    const code = await runMain(['audit', 'override'], { io });
+    assert.equal(code, 1);
+    assert.ok(err.some((l) => l.toLowerCase().includes('usage')));
+  });
+
+  test('a valid override on a deny record returns 0', async () => {
+    const dir = tmpDir('magi-main-audit-override-ok-');
+    const sink = new FsAppendAuditSink(dir);
+    const target = sink.append(verdict({ decision: 'deny' }), new Date('2026-08-13T10:00:00.000Z'));
+
+    const { io, out } = capturingIO();
+    const code = await runMain(['audit', 'override', target.hash, '--reason', 'operator verified manually'], {
+      io,
+      auditDir: dir,
+    });
+    assert.equal(code, 0);
+    assert.ok(out.some((l) => l.includes(target.hash)));
+  });
+
+  test('missing --reason returns 1 and writes an error', async () => {
+    const dir = tmpDir('magi-main-audit-override-no-reason-');
+    const sink = new FsAppendAuditSink(dir);
+    const target = sink.append(verdict({ decision: 'deny' }), new Date('2026-08-13T10:00:00.000Z'));
+
+    const { io, err } = capturingIO();
+    const code = await runMain(['audit', 'override', target.hash], { io, auditDir: dir });
+    assert.equal(code, 1);
+    assert.ok(err.length > 0);
+  });
+
+  test('an unknown hash returns 1 and writes an error', async () => {
+    const dir = tmpDir('magi-main-audit-override-unknown-');
+    const { io, err } = capturingIO();
+    const code = await runMain(['audit', 'override', 'doesnotexist', '--reason', 'x'], { io, auditDir: dir });
+    assert.equal(code, 1);
+    assert.ok(err.length > 0);
+  });
+
+  test('overriding an allow record returns 1 and writes an error', async () => {
+    const dir = tmpDir('magi-main-audit-override-allow-');
+    const sink = new FsAppendAuditSink(dir);
+    const target = sink.append(verdict({ decision: 'allow' }), new Date('2026-08-13T10:00:00.000Z'));
+
+    const { io, err } = capturingIO();
+    const code = await runMain(['audit', 'override', target.hash, '--reason', 'x'], { io, auditDir: dir });
+    assert.equal(code, 1);
+    assert.ok(err.length > 0);
+  });
+});
+
+describe('runMain — config loading without a "mode" key', () => {
+  test('a magi.config.json without a "mode" key loads successfully (mode resolves from MAGI_MODE only)', async () => {
+    const dir = tmpDir('magi-main-config-no-mode-');
+    const configPath = path.join(dir, 'magi.config.json');
+    fs.writeFileSync(
+      configPath,
+      JSON.stringify({
+        tiers: { sync: { k: 5 }, async: { k: 12 }, divergenceFloorPercent: 40 },
+        paths: { calibrationDir: '.magi/calibration/', auditDir: '.magi/audit/' },
+      }),
+    );
+
+    const { io, out } = capturingIO();
+    const code = await runMain(['audit', 'stats'], { io, configPath });
+    assert.equal(code, 0);
+    assert.ok(out.some((l) => l.includes('Total gated records')));
+  });
+});
+
 describe('runMain — calibrate (interview)', () => {
   test('a confirmed interview adds exactly one entry to the injected corpus', async () => {
     const dir = tmpDir('magi-main-calibrate-');

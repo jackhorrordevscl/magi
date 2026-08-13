@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import { pathToFileURL } from 'node:url';
 import { runCalibrateImport, runCalibrateInterview, runCalibrateVerify, createStdioCalibrateIO } from './calibrate.ts';
 import { computeAuditStats, formatAuditStats } from './audit-stats.ts';
+import { runAuditOverride } from './audit-override.ts';
 import { verifyChain } from '../audit/verify.ts';
 import { CalibrationCorpus } from '../calibration/corpus.ts';
 import { melchior } from '../gating/melchior.ts';
@@ -24,6 +25,7 @@ import type { EvaluatorPort } from '../gating/evaluator-port.ts';
  *   magi calibrate verify --fixtures <f>  — run the divergence harness
  *   magi audit verify                     — replay + verify the hash chain
  *   magi audit stats                      — verdict distribution / deny-rate proxy
+ *   magi audit override <hash> --reason "<why>" — document that a deny should be disregarded (append-only, non-mutating)
  *
  * `runMain` is the testable dispatch function (returns an exit code rather
  * than calling `process.exit` itself); the bottom-of-file guard is the real
@@ -40,14 +42,19 @@ const stdioMainIO: MainIO = {
   error: (line) => process.stderr.write(`${line}\n`),
 };
 
+/**
+ * `mode` is deliberately NOT a field here — per `sdd/magi-p3-enforcing-
+ * override/spec` Requirement: Single Mode Source, the operating mode
+ * resolves exclusively from the `MAGI_MODE` environment variable
+ * (`claude-code-hook/index.ts`'s `resolveMode()`); `magi.config.json` MUST
+ * NOT carry a `mode` key, and this type MUST NOT expose one.
+ */
 interface MagiConfig {
-  mode: 'shadow' | 'enforced';
   tiers: { sync: { k: number }; async: { k: number }; divergenceFloorPercent: number };
   paths: { calibrationDir: string; auditDir: string };
 }
 
 const DEFAULT_CONFIG: MagiConfig = {
-  mode: 'shadow',
   tiers: { sync: { k: 5 }, async: { k: 12 }, divergenceFloorPercent: 40 },
   paths: { calibrationDir: '.magi/calibration/', auditDir: '.magi/audit/' },
 };
@@ -92,10 +99,13 @@ export async function runMain(argv: string[], deps: MainDeps = {}): Promise<numb
   }
 
   if (command === 'audit') {
-    return runAuditCommand(subcommand, auditDir, io);
+    return runAuditCommand(subcommand, rest, auditDir, io);
   }
 
-  io.error('Usage: magi <calibrate [import <file> | verify --fixtures <file>] | audit <verify | stats>>');
+  io.error(
+    'Usage: magi <calibrate [import <file> | verify --fixtures <file>] | ' +
+      'audit <verify | stats | override <hash> --reason "<why>">>',
+  );
   return 1;
 }
 
@@ -158,7 +168,7 @@ async function runCalibrateCommand(
   return 1;
 }
 
-function runAuditCommand(subcommand: string | undefined, auditDir: string, io: MainIO): number {
+function runAuditCommand(subcommand: string | undefined, rest: string[], auditDir: string, io: MainIO): number {
   if (subcommand === 'verify') {
     const result = verifyChain(auditDir);
     if (result.valid) {
@@ -172,6 +182,24 @@ function runAuditCommand(subcommand: string | undefined, auditDir: string, io: M
   if (subcommand === 'stats') {
     const stats = computeAuditStats(auditDir);
     for (const line of formatAuditStats(stats)) io.write(line);
+    return 0;
+  }
+
+  if (subcommand === 'override') {
+    const targetHash = rest[0];
+    if (!targetHash) {
+      io.error('Usage: magi audit override <hash> --reason "<why>"');
+      return 1;
+    }
+    const reasonFlagIndex = rest.indexOf('--reason');
+    const reason = reasonFlagIndex >= 0 ? rest[reasonFlagIndex + 1] : undefined;
+
+    const result = runAuditOverride({ auditDir, targetHash, reason: reason ?? '' });
+    if (!result.ok) {
+      io.error(`magi audit override failed: ${result.error ?? 'unknown error'}`);
+      return 1;
+    }
+    io.write(`Override recorded: ${result.record?.hash ?? '(unknown hash)'} (targets ${targetHash})`);
     return 0;
   }
 

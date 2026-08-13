@@ -8,28 +8,32 @@ pipelines) before they execute. Three independent evaluators — **Melchior**
 deterministic, table-driven severity classifier decides how much consensus
 is required before an action is allowed.
 
-This repository currently ships **v1, scope P0–P2**: deterministic gating
-core, hash-chained audit log, a Claude Code `PreToolUse` hook adapter
-running in **shadow mode**, and a human-grounded calibration corpus +
-divergence harness. See [Scope](#scope-p0p2-this-repository) and
-[Out of scope](#out-of-scope-p3p4--not-implemented-here) below for the
-precise boundary.
+This repository currently ships **v1, scope P0–P3**: deterministic gating
+core, hash-chained audit log with an audited human-override record kind, a
+Claude Code `PreToolUse` hook adapter supporting both **shadow** and
+**enforcing** mode, and a human-grounded calibration corpus + divergence
+harness. See [Scope](#scope-p0p3-this-repository) and
+[Out of scope](#out-of-scope--not-implemented-here) below for the precise
+boundary.
 
-## Status: local-only, shadow mode
+## Status: local-only, opt-in enforcing mode
 
-This project has **no production deployment target yet**. It is being
-tuned locally against the operator's own judgment before any enforcing
-behavior ships. The Claude Code hook adapter runs in
-`MAGI_MODE=shadow` — see [Shadow mode](#shadow-mode-always-allows-always-records)
-for exactly what that means.
+This project has **no production deployment target yet**. Mode resolves
+exclusively from the `MAGI_MODE` environment variable, defaulting to
+`shadow` on anything unset or invalid — enforcing behavior is opt-in per
+session, never a config-file default. See
+[Shadow mode](#shadow-mode-always-allows-always-records) and
+[Enforcing mode](#enforcing-mode-blocks-deny-verdicts--audited-human-override)
+below for exactly what each mode does.
 
-## Scope (P0–P2, this repository)
+## Scope (P0–P3, this repository)
 
 | Phase | What it delivers |
 |---|---|
 | P0 — domain core + audit | `ProposedAction` normalization, table-driven severity classification (`src/gating/severity.ts`), the trivial-scope read-only allowlist (`src/gating/allowlist.ts`), quorum consensus + verdict assembly (`src/gating/consensus.ts`, `src/gating/verdict.ts`), and the tamper-evident hash-chained audit sink (`src/audit/`). |
 | P1 — shadow-mode hook | The Claude Code `PreToolUse` hook adapter (`claude-code-hook/index.ts`), wiring allowlist → severity → evaluators → consensus → verdict → audit into one pipeline, running in `MAGI_MODE=shadow`. |
 | P2 — calibration + divergence harness | A local, human-grounded calibration corpus (`src/calibration/corpus.ts`), deterministic lexical exemplar retrieval (`src/calibration/selector.ts`), and a divergence harness (`src/calibration/divergence-harness.ts`) that proves the three evaluator facets genuinely disagree on designed-divergent fixtures and agree on controls — catching cosmetic persona collapse. |
+| P3 — enforcing mode + audited human override | `MAGI_MODE=enforced` actually blocks a `deny` verdict via Claude Code's documented `hookSpecificOutput` contract, and `magi audit override <hash> --reason "<why>"` lets an operator document that a recorded deny should be disregarded without mutating the audit chain. |
 
 Three independent evaluators back every non-trivial gated action:
 
@@ -62,12 +66,60 @@ over-eager gate wedging a real workflow.
 This is a deliberate two-step rollout (see `sdd/magi/design`'s P1 → P4
 plan): observe and measure false-positive rate in shadow mode first,
 build enough confidence in the evaluators' judgment (backed by a real
-calibration corpus), and only then flip to enforcing. **No enforcing
-behavior exists in this repository.**
+calibration corpus), and only then flip to enforcing per session via
+`MAGI_MODE=enforced` — see
+[Enforcing mode](#enforcing-mode-blocks-deny-verdicts--audited-human-override)
+below.
 
 Use `magi audit stats` to see the recorded verdict distribution and a
-raw deny-rate proxy for the P1 evaluation period (see
+raw deny-rate proxy for the evaluation period (see
 [CLI commands](#cli-commands) below).
+
+## Enforcing mode: blocks deny verdicts + audited human override
+
+**`MAGI_MODE=enforced` blocks a tool call when the computed verdict's
+`decision` is `deny`** (mode resolves exclusively from the `MAGI_MODE`
+environment variable — `magi.config.json` carries no `mode` key at all,
+see spec Requirement: Single Mode Source). Any `allow` verdict, and the
+trivial-scope allowlist short-circuit, behave identically to shadow mode
+in both modes. Every action is still durably audited before the mode gate
+runs, in either mode.
+
+A block is communicated to Claude Code via the documented `PreToolUse`
+`hookSpecificOutput` contract (`permissionDecision: "deny"`), with a
+reason that includes **all three evaluators' individual votes and
+rationales** (not just the aggregate decision), plus the audit record's
+hash and a ready-to-copy override hint. The hook process itself always
+exits `0` — the JSON `permissionDecision` is the sole authority, never
+the exit code.
+
+```bash
+# Point Claude Code's PreToolUse hook at claude-code-hook/index.ts and set:
+MAGI_MODE=enforced
+```
+
+### Audited human override
+
+Blocking is not the end of the story: `magi audit override <hash>
+--reason "<why>"` lets an operator document that a specific recorded
+`deny` should be disregarded — **without mutating the tamper-evident
+audit chain** and **without granting an allowlist entry or triggering an
+automatic retry**. It appends a second, distinct record kind
+(`OverrideRecordSchema`) to the same hash chain, referencing the original
+record by hash:
+
+```bash
+magi audit override <hash> --reason "operator verified this force-push manually"
+```
+
+The CLI resolves the target **by content hash, not by `seq`**, requires a
+non-empty `--reason`, and only accepts a target whose `decision` is
+`deny` — any rejection (unknown hash, missing/empty reason, or a
+non-`deny` target) writes nothing at all. The action itself is never
+re-run by the override command; proceeding is a separate, deliberate
+operator re-attempt. `magi audit stats` reports override count/rate as
+its own metric — an override never reclassifies the original record out
+of the deny count.
 
 ### Trivial-scope allowlist
 
@@ -83,7 +135,7 @@ every execution, every command the allowlist can't positively confirm as
 trivial — goes through the full severity/quorum pipeline with no
 exception.
 
-## Out of scope (P3/P4 — NOT implemented here)
+## Out of scope — NOT implemented here
 
 The following are explicitly deferred to a future change, per
 `sdd/magi/tasks`' own "out of scope" boundary and the local-only rollout
@@ -94,18 +146,13 @@ decision (`sdd/magi/design-decisions`):
 - **Async mode's bounded tool loop + human escalation** (a stronger model
   with real, bounded tool access, escalating ambiguous/high-severity
   verdicts to a human with a visible-failure timeout).
-- **`--override-magi` CLI / audited human override** (Requirement: Audited
-  Human Override). No enforcing mode exists yet for an override to matter
-  against.
-- **`MAGI_MODE=enforced` flip** (the design's own `MagiMode` enum already
-  reserves the value for forward compatibility — `ProposedAction.mode`
-  and audit records can carry it — but no code path in this repository
-  ever blocks on it; the hook adapter's pipeline only implements shadow
-  behavior).
 
-Building any of the above now, against a pipeline and enforcement
+Building either of the above now, against a pipeline and escalation
 posture that don't exist yet, would be premature — this is a deliberate
-scope boundary, not an oversight.
+scope boundary, not an oversight. (Enforcing mode and the audited human
+override CLI, previously listed here, shipped in P3 — see
+[Enforcing mode](#enforcing-mode-blocks-deny-verdicts--audited-human-override)
+above.)
 
 ## Placeholder values — revisit after the first real corpus
 
@@ -151,8 +198,9 @@ The `magi` binary (`src/cli/main.ts`, bundled to `dist/magi.mjs` by
 | `magi calibrate` | Interviews the operator for one calibration exemplar (tag, severity, judgment narrative). Never writes without explicit confirmation. |
 | `magi calibrate import <candidates.json>` | Reviews a JSON array of candidate exemplars one at a time, requiring per-entry confirmation before writing. Candidates already present (identical content) are skipped without prompting. |
 | `magi calibrate verify --fixtures <fixtures.json>` | Runs the divergence harness against the real melchior/balthasar/casper evaluators and a JSON array of designed fixtures (`{id, kind: "divergent"\|"control", action, severity}[]`). No built-in fixture set ships yet — author your own from real judgment calls once you have some. |
-| `magi audit verify` | Replays the hash chain under `.magi/audit/` and reports whether it is intact (tamper-evident, not tamper-proof — see `src/audit/verify.ts`). |
-| `magi audit stats` | Reports verdict distribution (counts per decision, per severity tier) and a raw deny-rate proxy for the shadow-mode evaluation period. |
+| `magi audit verify` | Replays the hash chain under `.magi/audit/` and reports whether it is intact (tamper-evident, not tamper-proof — see `src/audit/verify.ts`). Verifies a chain mixing verdict and override records identically to a verdict-only chain. |
+| `magi audit stats` | Reports verdict distribution (counts per decision, per severity tier), a raw deny-rate proxy for the evaluation period, and override count/rate as a separate metric. |
+| `magi audit override <hash> --reason "<why>"` | Documents that the deny record matching `<hash>` should be disregarded — append-only, non-mutating, requires a non-empty `--reason`, only accepts a `deny` target. Writes nothing on any rejection path. |
 
 The calibration corpus (`.magi/calibration/`) and audit log
 (`.magi/audit/`) are both local-only and already excluded via
@@ -164,12 +212,20 @@ history and is never committed to a shared/remote repository.
 Point Claude Code's `PreToolUse` hook configuration at
 `claude-code-hook/index.ts` (run directly via `node
 claude-code-hook/index.ts` — Node's native TypeScript support means no
-build step is required for the hook itself). Set `MAGI_MODE=shadow` in
-the hook's environment (or omit it — `shadow` is the default for any
-unset or invalid value). The hook reads the tool-call payload from
-stdin, always exits `0`, and prints a JSON `{"decision":"allow","reason":
-"..."}` line to stdout describing what happened (trivial short-circuit,
-or the recorded verdict's decision).
+build step is required for the hook itself). Set `MAGI_MODE=shadow` or
+`MAGI_MODE=enforced` in the hook's environment (or omit it — `shadow` is
+the default for any unset or invalid value). The hook reads the tool-call
+payload from stdin, always exits `0`, and prints Claude Code's documented
+`PreToolUse` output contract to stdout:
+
+```json
+{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"allow"|"deny","permissionDecisionReason":"..."}}
+```
+
+`permissionDecision` is `"deny"` only when `MAGI_MODE=enforced` and the
+computed verdict is `deny`; every other case (shadow mode, an `allow`
+verdict, the trivial short-circuit, or an adapter-side failure — which
+always fails open) reports `"allow"`.
 
 ## Architecture references
 
@@ -177,5 +233,9 @@ or the recorded verdict's decision).
   is built against.
 - `sdd/magi/design` — locked stack and architecture decisions.
 - `sdd/magi/tasks` — the full phase-by-phase task breakdown.
+- `sdd/magi-p3-enforcing-override/spec` — requirements/scenarios for
+  enforcing mode and audited human override.
+- `sdd/magi-p3-enforcing-override/design` — architecture decisions behind
+  the enforcing-mode gate and the override record kind.
 - `docs/trivial-allowlist-scope.md` — the trivial-scope allowlist's
   confirmed boundary.

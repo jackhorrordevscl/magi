@@ -1,12 +1,11 @@
-import fs from 'node:fs';
-import path from 'node:path';
-import { AuditRecordSchema } from '../audit/record.ts';
-import type { AuditDecision, AuditRecord } from '../audit/record.ts';
+import { readChainRecords } from '../audit/read-chain.ts';
+import type { AuditDecision, AuditRecord, OverrideRecord } from '../audit/record.ts';
 import type { SeverityTier } from '../gating/proposed-action.ts';
 
 const DEFAULT_AUDIT_DIR = '.magi/audit';
 
 export interface AuditStats {
+  /** Count of verdict records only (design decision #8) — override records are never counted here. */
   totalRecords: number;
   byDecision: Record<AuditDecision, number>;
   bySeverity: Record<SeverityTier, number>;
@@ -21,55 +20,61 @@ export interface AuditStats {
    * requires a human reviewing the individual denied records (e.g. via
    * `magi calibrate import` to turn confirmed false positives into
    * calibration exemplars).
+   *
+   * The denominator is verdict records only (`totalRecords`) — overrides
+   * are never counted in it (design decision #8): including them would
+   * silently deflate this proxy without changing what actually happened.
    */
   denyRateProxy: number;
-}
-
-function listDayFiles(auditDir: string): string[] {
-  if (!fs.existsSync(auditDir)) return [];
-  return fs
-    .readdirSync(auditDir)
-    .filter((name) => name.endsWith('.jsonl'))
-    .sort();
-}
-
-function readAllRecords(auditDir: string): AuditRecord[] {
-  const records: AuditRecord[] = [];
-  for (const fileName of listDayFiles(auditDir)) {
-    const lines = fs
-      .readFileSync(path.join(auditDir, fileName), 'utf8')
-      .split('\n')
-      .filter((line) => line.trim().length > 0);
-    for (const line of lines) {
-      records.push(AuditRecordSchema.parse(JSON.parse(line)));
-    }
-  }
-  return records;
+  /** Count of override records — a metric distinct from `byDecision` (spec Requirement: Override Count Reported Separately). Overriding a deny NEVER reclassifies it out of `byDecision.deny`. */
+  overrideCount: number;
+  /** `overrideCount / byDecision.deny` — "share of denies a human disputed". `0` when there are no denies. */
+  overrideRate: number;
 }
 
 const ZERO_DECISION: Record<AuditDecision, number> = { allow: 0, deny: 0 };
 const ZERO_SEVERITY: Record<SeverityTier, number> = { low: 0, medium: 0, high: 0, critical: 0 };
 
+function isVerdictRecord(record: AuditRecord | OverrideRecord): record is AuditRecord {
+  return 'decision' in record;
+}
+
 /**
- * Reads every audit record under `auditDir` (default `.magi/audit`) and
- * aggregates verdict distribution plus the P1 shadow-mode
- * false-positive-rate proxy. Pure aggregation over already-written records
- * — no model call, no network. Backs the `magi audit stats` CLI command
- * (see `src/cli/main.ts`).
+ * Reads every chain record under `auditDir` (default `.magi/audit`) and
+ * aggregates verdict distribution, the P1 shadow-mode false-positive-rate
+ * proxy, and override accounting. Pure aggregation over already-written
+ * records — no model call, no network. Backs the `magi audit stats` CLI
+ * command (see `src/cli/main.ts`).
+ *
+ * Partitions `readChainRecords`' single list into verdict records (carry
+ * `decision`) and override records (carry `override`) per design decision
+ * #8: overrides are a separate metric, never folded into `byDecision` or
+ * `denyRateProxy`'s denominator.
  */
 export function computeAuditStats(auditDir: string = DEFAULT_AUDIT_DIR): AuditStats {
-  const records = readAllRecords(auditDir);
+  const records = readChainRecords(auditDir);
+  const verdictRecords = records.filter(isVerdictRecord);
+  const overrideRecords = records.filter((record): record is OverrideRecord => !isVerdictRecord(record));
 
   const byDecision: Record<AuditDecision, number> = { ...ZERO_DECISION };
   const bySeverity: Record<SeverityTier, number> = { ...ZERO_SEVERITY };
-  for (const record of records) {
+  for (const record of verdictRecords) {
     byDecision[record.decision] += 1;
     bySeverity[record.severity] += 1;
   }
 
-  const denyRateProxy = records.length === 0 ? 0 : byDecision.deny / records.length;
+  const denyRateProxy = verdictRecords.length === 0 ? 0 : byDecision.deny / verdictRecords.length;
+  const overrideCount = overrideRecords.length;
+  const overrideRate = byDecision.deny === 0 ? 0 : overrideCount / byDecision.deny;
 
-  return { totalRecords: records.length, byDecision, bySeverity, denyRateProxy };
+  return {
+    totalRecords: verdictRecords.length,
+    byDecision,
+    bySeverity,
+    denyRateProxy,
+    overrideCount,
+    overrideRate,
+  };
 }
 
 /** Human-readable rendering of `AuditStats`, for the `magi audit stats` CLI output. */
@@ -81,5 +86,7 @@ export function formatAuditStats(stats: AuditStats): string[] {
       `high: ${stats.bySeverity.high}, critical: ${stats.bySeverity.critical}`,
     `Deny-rate proxy: ${(stats.denyRateProxy * 100).toFixed(1)}% ` +
       '(raw proxy only — confirm each denial with a human before treating it as a real false positive)',
+    `Overrides: ${stats.overrideCount} (${(stats.overrideRate * 100).toFixed(1)}% of denies overridden — ` +
+      'documentary only, does not reclassify the original deny)',
   ];
 }

@@ -46,23 +46,23 @@ Chain strategy: stacked-to-main
 
 ## Phase 3: Audited Human Override CLI (Integration)
 
-- [ ] 3.1 Create `src/cli/audit-override.ts` exporting `runAuditOverride({auditDir, targetHash, reason, actor?, now?}): {ok, error?, record?}` using `readChainRecords` to find the target by hash.
-- [ ] 3.2 In `runAuditOverride`, reject with no write when: hash not found, `reason` missing/empty, or target `decision !== 'deny'`.
-- [ ] 3.3 On success, call `appendOverride()` referencing `targetHash`/`targetSeq` and return the new record.
-- [ ] 3.4 In `src/cli/main.ts`, wire `override` into `runAuditCommand` (pass `rest` + `io`, currently not forwarded), update the usage string, and delete `MagiConfig.mode` and `DEFAULT_CONFIG.mode`.
-- [ ] 3.5 In `src/cli/audit-stats.ts`, switch to `readChainRecords`, partition chain kinds (verdict vs override), and add `overrideCount` + `overrideRate = overrides / denies` as a metric separate from the allow/deny split; keep `denyRateProxy` counting verdict records only.
-- [ ] 3.6 In `magi.config.json`, delete the `"mode"` key and its `_note` line.
+- [x] 3.1 Create `src/cli/audit-override.ts` exporting `runAuditOverride({auditDir, targetHash, reason, actor?, now?}): {ok, error?, record?}` using `readChainRecords` to find the target by hash.
+- [x] 3.2 In `runAuditOverride`, reject with no write when: hash not found, `reason` missing/empty, or target `decision !== 'deny'`.
+- [x] 3.3 On success, call `appendOverride()` referencing `targetHash`/`targetSeq` and return the new record.
+- [x] 3.4 In `src/cli/main.ts`, wire `override` into `runAuditCommand` (pass `rest` + `io`, currently not forwarded), update the usage string, and delete `MagiConfig.mode` and `DEFAULT_CONFIG.mode`.
+- [x] 3.5 In `src/cli/audit-stats.ts`, switch to `readChainRecords`, partition chain kinds (verdict vs override), and add `overrideCount` + `overrideRate = overrides / denies` as a metric separate from the allow/deny split; keep `denyRateProxy` counting verdict records only.
+- [x] 3.6 In `magi.config.json`, delete the `"mode"` key and its `_note` line.
 
 ## Phase 4: Testing
 
 - [x] 4.1 In `tests/claude-code-hook/index.test.ts`, test `runHook` allow/deny matrix across mode x decision x trivial, block-reason containing all three rationales + hash, and the 10k cap (RED before Phase 2 code, GREEN after).
 - [x] 4.2 In `tests/audit/audit-sink.test.ts`, test `appendOverride` chain bookkeeping, day rollover, and `ChainRecordSchema` round-trip.
-- [ ] 4.3 Create `tests/cli/audit-override.test.ts` covering unknown hash, missing/empty reason, and target `decision:'allow'` — each asserting rejection AND a byte-identical file + unchanged HEAD (no write).
-- [ ] 4.4 In `tests/cli/audit-stats.test.ts`, test 5 denies + 2 overrides yields deny split 5, overrides 2, and `denyRateProxy` denominator excludes overrides.
+- [x] 4.3 Create `tests/cli/audit-override.test.ts` covering unknown hash, missing/empty reason, and target `decision:'allow'` — each asserting rejection AND a byte-identical file + unchanged HEAD (no write).
+- [x] 4.4 In `tests/cli/audit-stats.test.ts`, test 5 denies + 2 overrides yields deny split 5, overrides 2, and `denyRateProxy` denominator excludes overrides.
 - [x] 4.5 In `tests/audit/verify.test.ts`, test `verifyChain()` stays valid over a mixed verdict+override chain, and over a pre-P3 chain with no override records (regression guard for decision #3).
-- [ ] 4.6 In `tests/cli/main.test.ts`, test `runMain(['audit','override',...])` exit codes and that config loading without a `mode` key succeeds.
+- [x] 4.6 In `tests/cli/main.test.ts`, test `runMain(['audit','override',...])` exit codes and that config loading without a `mode` key succeeds.
 - [x] 4.7 Extend the existing spawn-based hook E2E test: real binary with `MAGI_MODE=enforced` + deny verdict asserts stdout `permissionDecision:'deny'` and exit code `0`.
 
 ## Phase 5: Documentation
 
-- [ ] 5.1 Update `README.md` to move both P3 items out of "Out of scope" and document enforcing mode (`MAGI_MODE=enforced`) and the `magi audit override <hash> --reason "..."` command.
+- [x] 5.1 Update `README.md` to move both P3 items out of "Out of scope" and document enforcing mode (`MAGI_MODE=enforced`) and the `magi audit override <hash> --reason "..."` command.
