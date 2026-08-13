@@ -303,8 +303,8 @@ const NON_GIT_RULES: SubCommandRule[] = [
     tier: 'high',
   },
   {
-    // Only a raw non-benign block device destination escalates; every
-    // other `dd` invocation stays `low` — no catch-all `high` (decision 5).
+    // A raw non-benign block device destination escalates to critical —
+    // the most irreversible `dd` outcome (overwrites a whole device).
     id: 'dd-write-block-device',
     matches: (sub, exec) =>
       exec === 'dd' &&
@@ -312,6 +312,26 @@ const NON_GIT_RULES: SubCommandRule[] = [
         (a) => a.startsWith('of=') && a.slice(3).startsWith('/dev/') && !BENIGN_DEVICES.has(a.slice(3)),
       ),
     tier: 'critical',
+  },
+  {
+    // Catch-all per the approved spec (Requirement 3, "dd Escalates by
+    // Destination"): any `dd` invocation that isn't a benign-device
+    // destination escalates to `high`, even when it isn't the raw
+    // non-benign block-device case above (e.g. `of=` targets a regular
+    // file, or there's no `of=` argument at all). A benign device
+    // destination (`of=/dev/null`, etc.) is explicitly excluded and stays
+    // `low`. A non-benign device destination also matches this rule, but
+    // `dd-write-block-device` already escalates it to `critical`, and
+    // `critical` outranks `high` under `maxTier`, so that case is
+    // unaffected.
+    id: 'dd-other-invocation',
+    matches: (sub, exec) => {
+      if (exec !== 'dd') return false;
+      const ofArg = sub.args.find((a) => a.startsWith('of='));
+      if (ofArg && BENIGN_DEVICES.has(ofArg.slice(3))) return false;
+      return true;
+    },
+    tier: 'high',
   },
   {
     // Exact `mkfs` or `mkfs.`-prefixed only — never a loose

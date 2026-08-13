@@ -191,8 +191,12 @@ describe('classify — dd escalates by destination (non-git threat matrix)', () 
     assert.equal(classify(action('dd if=/dev/sda of=/dev/null')), 'low');
   });
 
-  test('dd if=a of=./out.img classifies as low (regular file target, no catch-all high)', () => {
-    assert.equal(classify(action('dd if=a of=./out.img')), 'low');
+  test('dd if=a of=./out.img classifies as high (regular file target, catch-all)', () => {
+    assert.equal(classify(action('dd if=a of=./out.img')), 'high');
+  });
+
+  test('dd if=/dev/zero of=./image.bin classifies as high (regular file target, catch-all)', () => {
+    assert.equal(classify(action('dd if=/dev/zero of=./image.bin')), 'high');
   });
 });
 
