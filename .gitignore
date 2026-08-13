@@ -1,0 +1,19 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+
+# magi local-only state — never committed (per design decision)
+.magi/calibration/
+.magi/audit/
+
+# Logs
+*.log
+
+# Editor / OS
+.DS_Store
+
+# Local tooling state (SDD skill registry cache, CodeGraph index)
+.atl/
+.codegraph/

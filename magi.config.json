@@ -1,0 +1,18 @@
+{
+  "_note": "'mode' is the default; runtime callers may override it via the MAGI_MODE environment variable (values: shadow | enforced).",
+  "mode": "shadow",
+  "tiers": {
+    "_note": "PLACEHOLDER values per design sdd/magi/design (#1008). Exact tier boundaries and K values are subject to calibration in a later PR and are NOT load-bearing yet in PR1 scope.",
+    "sync": {
+      "k": 5
+    },
+    "async": {
+      "k": 12
+    },
+    "divergenceFloorPercent": 40
+  },
+  "paths": {
+    "calibrationDir": ".magi/calibration/",
+    "auditDir": ".magi/audit/"
+  }
+}
