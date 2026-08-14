@@ -20,7 +20,9 @@ y archivado — ver
 [Matriz de amenazas no-git](#matriz-de-amenazas-no-git-p4) más abajo). Ver
 [Alcance](#alcance-p0p4-este-repositorio) y
 [Fuera de alcance](#fuera-de-alcance--no-implementado-aquí) más abajo para
-el límite preciso.
+el límite preciso. Para una guía práctica de uso día a día (modos, la
+matriz de severidad, todos los comandos de la CLI, cambio de backend de
+evaluador, resolución de problemas), ver [MANUAL.md](MANUAL.md).
 
 ## Estado: solo local, modo enforcing opt-in
 
@@ -60,17 +62,23 @@ gratuita de [Groq](https://groq.com) (`src/gating/groq-evaluator.ts`,
 `GROQ_API_KEY` — gratis, sin tarjeta requerida), cada uno con su propio
 modelo confirmado del tier gratuito: Melchior usa `openai/gpt-oss-120b`,
 Balthasar usa `llama-3.3-70b-versatile`, y Casper usa
-`llama-3.1-8b-instant`. La implementación respaldada por Anthropic
-(`src/gating/anthropic-evaluator.ts`, `ANTHROPIC_API_KEY`) sigue
-existiendo y satisface el mismo contrato `EvaluatorPort`. Cada función
-`create*` (`createMelchior`/`createBalthasar`/`createCasper`) acepta
+`llama-3.1-8b-instant`. Existen dos backends alternativos de
+`EvaluatorPort` que satisfacen el mismo contrato pero **no** están
+conectados a producción: `AnthropicEvaluator`
+(`src/gating/anthropic-evaluator.ts`, `ANTHROPIC_API_KEY`) y
+`GeminiEvaluator` (`src/gating/gemini-evaluator.ts`, `GEMINI_API_KEY`, con
+`gemini-2.5-flash-lite` como modelo por defecto). Cada función `create*`
+(`createMelchior`/`createBalthasar`/`createCasper`) acepta
 `GroqEvaluatorOptions` (`client`, `apiKey`, `model`, `timeoutMs`,
 `maxTokens`, `baseUrl`) para sobrescribir la configuración del backend
 Groq por defecto o inyectar un doble de prueba; para cambiar el backend
-por completo (por ejemplo, volver a Anthropic), construir
-`new AnthropicEvaluator(name, facet, options)` directamente con la faceta
+por completo (por ejemplo, a Anthropic o a Gemini), construir
+`new AnthropicEvaluator(name, facet, options)` o
+`new GeminiEvaluator(name, facet, options)` directamente con la faceta
 correspondiente de `melchior.ts`/`balthasar.ts`/`casper.ts` en lugar de
-usar `create*`.
+usar `create*`, y pasar el resultado vía `RunHookOptions.evaluators` /
+`MainDeps.evaluators` — ver MANUAL.md, sección 4, para ejemplos concretos
+de ambos cambios de backend.
 
 ## Modo shadow: siempre permite, siempre registra
 
@@ -298,6 +306,9 @@ adaptador — que siempre falla abierto) reporta `"allow"`.
 
 ## Referencias de arquitectura
 
+- [MANUAL.md](MANUAL.md) — la guía práctica de uso día a día (modos,
+  matriz de severidad, referencia completa de la CLI, cambio de backend de
+  evaluador, resolución de problemas).
 - `sdd/magi/spec` — los requisitos/escenarios formales contra los que está
   construida esta implementación.
 - `sdd/magi/design` — el stack fijado y las decisiones de arquitectura.
@@ -307,6 +318,9 @@ adaptador — que siempre falla abierto) reporta `"allow"`.
 - `sdd/magi-p3-enforcing-override/design` — decisiones de arquitectura
   detrás de la puerta de modo enforcing y el tipo de registro de
   anulación.
+- `openspec/specs/multi-provider-evaluators/spec.md` — los
+  requisitos/escenarios formales contra los que está construido
+  `GeminiEvaluator`.
 - `docs/trivial-allowlist-scope.md` — el límite confirmado de la
   allowlist de alcance trivial.
 

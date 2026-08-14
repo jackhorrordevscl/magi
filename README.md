@@ -18,7 +18,9 @@ archived — see
 [Non-git threat matrix](#non-git-threat-matrix-p4) below). See
 [Scope](#scope-p0p4-this-repository) and
 [Out of scope](#out-of-scope--not-implemented-here) below for the precise
-boundary.
+boundary. For a practical, day-to-day usage guide (modes, the severity
+matrix, every CLI command, evaluator backend swaps, troubleshooting), see
+[MANUAL.md](MANUAL.md).
 
 ## Status: local-only, opt-in enforcing mode
 
@@ -56,16 +58,21 @@ By default, all three named evaluators are backed by
 [Groq](https://groq.com)'s free-tier API (`src/gating/groq-evaluator.ts`,
 `GROQ_API_KEY` — free, no card required), each on its own confirmed
 free-tier model: Melchior uses `openai/gpt-oss-120b`, Balthasar uses
-`llama-3.3-70b-versatile`, and Casper uses `llama-3.1-8b-instant`. The
-Anthropic-backed implementation (`src/gating/anthropic-evaluator.ts`,
-`ANTHROPIC_API_KEY`) still ships and satisfies the same `EvaluatorPort`
-contract. Each `create*` function (`createMelchior`/`createBalthasar`/
-`createCasper`) accepts `GroqEvaluatorOptions` (`client`, `apiKey`, `model`,
-`timeoutMs`, `maxTokens`, `baseUrl`) to override the default Groq backend's
-settings or inject a test double; to swap the backend entirely (e.g. back
-to Anthropic), construct `new AnthropicEvaluator(name, facet, options)`
-directly with the matching facet from `melchior.ts`/`balthasar.ts`/
-`casper.ts` instead of using `create*`.
+`llama-3.3-70b-versatile`, and Casper uses `llama-3.1-8b-instant`. Two alternative `EvaluatorPort`
+backends ship and satisfy the same contract but are **not** wired into
+production: `AnthropicEvaluator` (`src/gating/anthropic-evaluator.ts`,
+`ANTHROPIC_API_KEY`) and `GeminiEvaluator` (`src/gating/gemini-evaluator.ts`,
+`GEMINI_API_KEY`, defaults to `gemini-2.5-flash-lite`). Each `create*`
+function (`createMelchior`/`createBalthasar`/`createCasper`) accepts
+`GroqEvaluatorOptions` (`client`, `apiKey`, `model`, `timeoutMs`,
+`maxTokens`, `baseUrl`) to override the default Groq backend's settings or
+inject a test double; to swap the backend entirely (e.g. to Anthropic or
+Gemini), construct `new AnthropicEvaluator(name, facet, options)` or
+`new GeminiEvaluator(name, facet, options)` directly with the matching
+facet from `melchior.ts`/`balthasar.ts`/`casper.ts` instead of using
+`create*`, and pass the result via `RunHookOptions.evaluators` /
+`MainDeps.evaluators` — see MANUAL.md, section 4, for worked examples of
+both swaps.
 
 ## Shadow mode: always allows, always records
 
@@ -277,6 +284,9 @@ always fails open) reports `"allow"`.
 
 ## Architecture references
 
+- [MANUAL.md](MANUAL.md) — the practical, day-to-day usage guide (modes,
+  severity matrix, full CLI reference, evaluator backend swaps,
+  troubleshooting).
 - `sdd/magi/spec` — the formal requirements/scenarios this implementation
   is built against.
 - `sdd/magi/design` — locked stack and architecture decisions.
@@ -285,6 +295,8 @@ always fails open) reports `"allow"`.
   enforcing mode and audited human override.
 - `sdd/magi-p3-enforcing-override/design` — architecture decisions behind
   the enforcing-mode gate and the override record kind.
+- `openspec/specs/multi-provider-evaluators/spec.md` — the formal
+  requirements/scenarios `GeminiEvaluator` is built against.
 - `docs/trivial-allowlist-scope.md` — the trivial-scope allowlist's
   confirmed boundary.
 
