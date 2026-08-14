@@ -126,6 +126,38 @@ const melchiorAnthropic = new AnthropicEvaluator('melchior', MELCHIOR_FACET, {
 
 Y después lo pasás en el array `evaluators` que espera `runHook`/`RunHookOptions` o `MainDeps.evaluators` (ver `src/cli/main.ts` y `claude-code-hook/index.ts`).
 
+### Usar Gemini como backend
+
+`GeminiEvaluator` (`src/gating/gemini-evaluator.ts`) es un tercer backend `EvaluatorPort`, contra la API `generateContent` de Google. Cumple el mismo contrato que Groq y Anthropic (tool-call forzado, timeout de 2500ms, fail-closed a `deny` sin repair ni retry) pero con su propio wire shape: auth por header `x-goog-api-key` (no `Authorization: Bearer`), y el modelo interpolado en la URL en vez de ir en el body — por eso `GeminiEvaluatorOptions.baseUrl` es un **base path**, no un endpoint completo, a diferencia de `GroqEvaluatorOptions.baseUrl`.
+
+```ts
+interface GeminiEvaluatorOptions {
+  client?: GeminiClient;     // fake inyectable para tests
+  apiKey?: string;           // default: process.env.GEMINI_API_KEY
+  model?: string;            // default: 'gemini-2.5-flash-lite'
+  timeoutMs?: number;        // default: 2500
+  maxTokens?: number;        // default: 512
+  baseUrl?: string;          // default: base path de Gemini, el cliente arma
+                              // `${baseUrl}/v1beta/models/${model}:generateContent`
+}
+```
+
+Seteá `GEMINI_API_KEY` en el entorno (también free tier, sin tarjeta). Igual que con Anthropic, esto es un override manual vía DI — no cambia el default de ningún evaluador nombrado. Si querés que, por ejemplo, Melchior use Gemini en vez de Groq, lo construís directamente a nivel código:
+
+```ts
+import { GeminiEvaluator } from './src/gating/gemini-evaluator.ts';
+import { MELCHIOR_FACET } from './src/gating/melchior.ts';
+
+const melchiorGemini = new GeminiEvaluator('melchior', MELCHIOR_FACET, {
+  apiKey: process.env.GEMINI_API_KEY,
+  model: 'gemini-2.5-flash-lite',
+});
+```
+
+Y después lo pasás en el mismo array `evaluators` que espera `runHook`/`RunHookOptions` o `MainDeps.evaluators`, igual que en el ejemplo de Anthropic de arriba.
+
+**Caveat del free tier**: los prompts que mandás al tier gratuito de Gemini pueden ser usados por Google para entrenamiento. No hay comparación de costos ni de cuotas acá — si te importa esa política de datos, es algo a evaluar antes de elegir este backend.
+
 ### Lo que NO existe todavía
 
 **No hay ninguna forma de cambiar de evaluador vía archivo de configuración.** `magi.config.json` no tiene ni una clave para esto — el único mecanismo hoy es construir el evaluador a mano en código, como en el ejemplo de arriba. Un layer de config-file para elegir modelo/backend/timeout por evaluador está en fase de **exploración**, no aprobado ni planificado — ver sección 11.

@@ -170,3 +170,143 @@ describe('GeminiEvaluator — evaluator identity', () => {
     assert.equal(typeof evaluator.castVote, 'function');
   });
 });
+
+describe('GeminiEvaluator — non-conforming output is denied, never repaired/retried', () => {
+  test('no functionCall part at all -> deny, single call (no retry)', async () => {
+    let callCount = 0;
+    const client: GeminiClient = {
+      create: async () => {
+        callCount += 1;
+        return { candidates: [{ content: { parts: [] } }] } as never;
+      },
+    };
+    const evaluator = new GeminiEvaluator('melchior', FACET, { client });
+
+    const vote = await evaluator.castVote(action(), 'high');
+
+    assert.equal(vote.vote, 'deny');
+    assert.equal(vote.evaluator, 'melchior');
+    assert.match(vote.rationale, /no cast_vote function call/);
+    assert.equal(callCount, 1);
+  });
+
+  test('wrong functionCall name -> deny, single call', async () => {
+    let callCount = 0;
+    const client: GeminiClient = {
+      create: async () => {
+        callCount += 1;
+        return functionCallResponse({ vote: 'allow', rationale: 'ok' }, 'some_other_tool') as never;
+      },
+    };
+    const evaluator = new GeminiEvaluator('balthasar', FACET, { client });
+    const vote = await evaluator.castVote(action(), 'low');
+    assert.equal(vote.vote, 'deny');
+    assert.equal(callCount, 1);
+  });
+
+  test('args missing rationale -> deny, single call', async () => {
+    let callCount = 0;
+    const client: GeminiClient = {
+      create: async () => {
+        callCount += 1;
+        return functionCallResponse({ vote: 'allow' }) as never;
+      },
+    };
+    const evaluator = new GeminiEvaluator('melchior', FACET, { client });
+    const vote = await evaluator.castVote(action(), 'low');
+    assert.equal(vote.vote, 'deny');
+    assert.match(vote.rationale, /schema validation/);
+    assert.equal(callCount, 1);
+  });
+
+  test('args.vote outside the enum -> deny, single call', async () => {
+    let callCount = 0;
+    const client: GeminiClient = {
+      create: async () => {
+        callCount += 1;
+        return functionCallResponse({ vote: 'maybe', rationale: 'unsure' }) as never;
+      },
+    };
+    const evaluator = new GeminiEvaluator('casper', FACET, { client });
+    const vote = await evaluator.castVote(action(), 'low');
+    assert.equal(vote.vote, 'deny');
+    assert.equal(callCount, 1);
+  });
+
+  test('empty-string rationale -> deny, single call', async () => {
+    let callCount = 0;
+    const client: GeminiClient = {
+      create: async () => {
+        callCount += 1;
+        return functionCallResponse({ vote: 'allow', rationale: '' }) as never;
+      },
+    };
+    const evaluator = new GeminiEvaluator('melchior', FACET, { client });
+    const vote = await evaluator.castVote(action(), 'low');
+    assert.equal(vote.vote, 'deny');
+    assert.equal(callCount, 1);
+  });
+});
+
+describe('GeminiEvaluator — fail-closed on timeout/error/non-2xx, never allow', () => {
+  test('client throws synchronously/rejects -> deny', async () => {
+    const client: GeminiClient = {
+      create: async () => {
+        throw new Error('network down');
+      },
+    };
+    const evaluator = new GeminiEvaluator('melchior', FACET, { client });
+    const vote = await evaluator.castVote(action(), 'critical');
+    assert.equal(vote.vote, 'deny');
+    assert.match(vote.rationale, /fail-closed/);
+  });
+
+  test('non-2xx response (e.g. 429) -> deny with rationale mentioning the status', async () => {
+    const client: GeminiClient = {
+      create: async () => {
+        throw new Error('Gemini API responded with non-2xx status 429');
+      },
+    };
+    const evaluator = new GeminiEvaluator('balthasar', FACET, { client });
+    const vote = await evaluator.castVote(action(), 'low');
+    assert.equal(vote.vote, 'deny');
+    assert.match(vote.rationale, /429/);
+  });
+
+  test('client never resolves before the AbortSignal fires -> deny (timeout)', async () => {
+    const client: GeminiClient = {
+      create: (_body, options) =>
+        new Promise((_resolve, reject) => {
+          options?.signal?.addEventListener('abort', () => {
+            reject(new Error('aborted'));
+          });
+        }) as never,
+    };
+    const evaluator = new GeminiEvaluator('balthasar', FACET, { client, timeoutMs: 15 });
+    const start = Date.now();
+    const vote = await evaluator.castVote(action(), 'high');
+    const elapsed = Date.now() - start;
+
+    assert.equal(vote.vote, 'deny');
+    assert.ok(elapsed < 500, `expected fast timeout-driven deny, took ${elapsed}ms`);
+  });
+
+  test('a timeout deny is never repaired into an allow, even if the client eventually would have allowed', async () => {
+    const client: GeminiClient = {
+      create: (_body, options) =>
+        new Promise((resolve, reject) => {
+          const timer = setTimeout(
+            () => resolve(functionCallResponse({ vote: 'allow', rationale: 'late' }) as never),
+            200,
+          );
+          options?.signal?.addEventListener('abort', () => {
+            clearTimeout(timer);
+            reject(new Error('aborted'));
+          });
+        }),
+    };
+    const evaluator = new GeminiEvaluator('casper', FACET, { client, timeoutMs: 15 });
+    const vote = await evaluator.castVote(action(), 'high');
+    assert.equal(vote.vote, 'deny');
+  });
+});
