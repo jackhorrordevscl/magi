@@ -1,4 +1,12 @@
+<p align="center">
+  <img src="Nerv-logo.webp" alt="Logo de NERV" width="180">
+</p>
+
 # MAGI — Multi-Agent Action Gating
+
+<p align="center">
+  <img src="magi01.jpg" alt="Banner de MAGI" width="100%">
+</p>
 
 MAGI es una puerta de control independiente y multi-perspectiva que decide
 allow/deny sobre acciones de alto impacto propuestas por agentes de código

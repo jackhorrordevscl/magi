@@ -1,4 +1,12 @@
+<p align="center">
+  <img src="Nerv-logo.webp" alt="NERV logo" width="180">
+</p>
+
 # MAGI — Multi-Agent Action Gating
+
+<p align="center">
+  <img src="magi01.jpg" alt="MAGI banner" width="100%">
+</p>
 
 MAGI is an independent, multi-perspective gate that rules allow/deny on
 high-impact actions proposed by coding agents (and, in a future phase, CI/CD
