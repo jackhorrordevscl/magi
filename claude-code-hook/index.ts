@@ -9,12 +9,14 @@ import { balthasar } from '../src/gating/balthasar.ts';
 import { casper } from '../src/gating/casper.ts';
 import { FsAppendAuditSink } from '../src/audit/fs-append-sink.ts';
 import { MagiModeSchema } from '../src/gating/proposed-action.ts';
+import { resolveExemplarSelection } from '../src/calibration/exemplar-injection.ts';
 import type { AuditRecord } from '../src/audit/record.ts';
 import type { AuditSink } from '../src/audit/audit-sink.ts';
 import type { EvaluatorPort } from '../src/gating/evaluator-port.ts';
 import type { Vote } from '../src/gating/consensus.ts';
 import type { MagiMode, ProposedAction } from '../src/gating/proposed-action.ts';
 import type { Verdict } from '../src/gating/verdict.ts';
+import type { CalibrationCorpus } from '../src/calibration/corpus.ts';
 
 /**
  * Claude Code `PreToolUse` hook adapter — resolves `mode` from `MAGI_MODE`
@@ -130,6 +132,14 @@ export interface RunHookOptions {
   evaluators?: readonly [EvaluatorPort, EvaluatorPort, EvaluatorPort];
   auditSink?: AuditSink;
   now?: Date;
+  /**
+   * Test seam mirroring the existing `auditSink` seam: when supplied,
+   * `resolveExemplarSelection` reads exemplars from this corpus instead of
+   * constructing its own default `CalibrationCorpus()`. Never touched by
+   * `divergence-harness.ts`, which drives `collectVotes` directly and never
+   * calls `runHook`.
+   */
+  corpus?: CalibrationCorpus;
 }
 
 export interface HookOutcome {
@@ -153,9 +163,18 @@ export interface HookOutcome {
 
 /**
  * Runs the full MAGI gating pipeline for one proposed action: trivial-scope
- * allowlist short-circuit -> severity classification -> evaluators
- * (parallel, via `collectVotes`) -> consensus/verdict assembly -> durable
- * audit sink append -> enforcing-mode gate.
+ * allowlist short-circuit -> severity classification -> ONE shared
+ * calibration exemplar selection (`resolveExemplarSelection`, never thrown,
+ * per `sdd/magi-calibration-live-wiring/design`) -> evaluators (parallel,
+ * via `collectVotes`, all three fed the identical exemplar set) ->
+ * consensus/verdict assembly (real `calibrationCorpusHash`/`exemplarIds`)
+ * -> durable audit sink append -> enforcing-mode gate.
+ *
+ * `runHook` is the ONLY production caller of `resolveExemplarSelection` —
+ * exactly one corpus read and one exemplar selection per non-trivial
+ * action, shared by all three evaluators and the verdict (spec Requirement:
+ * Single Shared Exemplar Selection Per Action). Trivial actions short-
+ * circuit above and never touch the corpus at all.
  *
  * The verdict is ALWAYS durably recorded to the audit sink FIRST,
  * regardless of mode — `auditSink.append()` is awaited-through (it is
@@ -177,8 +196,9 @@ export async function runHook(action: ProposedAction, options: RunHookOptions = 
   const now = options.now ?? new Date();
 
   const severity = classify(action);
-  const votes = await collectVotes(evaluators, action, severity);
-  const verdict = assembleVerdict(action, severity, votes);
+  const selection = resolveExemplarSelection(action, severity, options.corpus ? { corpus: options.corpus } : {});
+  const votes = await collectVotes(evaluators, action, severity, selection.exemplars);
+  const verdict = assembleVerdict(action, severity, votes, selection);
 
   // Durable audit write BEFORE returning — `FsAppendAuditSink.append()` is
   // itself synchronous (write + fsync complete before it returns), so

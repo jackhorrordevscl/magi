@@ -7,9 +7,11 @@ import { spawnSync } from 'node:child_process';
 import { runHook, normalizeToProposedAction, buildBlockReason, capReason } from '../../claude-code-hook/index.ts';
 import type { ClaudeCodeHookInput } from '../../claude-code-hook/index.ts';
 import { FsAppendAuditSink } from '../../src/audit/fs-append-sink.ts';
+import { CalibrationCorpus } from '../../src/calibration/corpus.ts';
 import type { AuditRecord } from '../../src/audit/record.ts';
 import type { EvaluatorPort } from '../../src/gating/evaluator-port.ts';
 import type { Vote } from '../../src/gating/consensus.ts';
+import type { CalibrationEntry } from '../../src/calibration/corpus-schema.ts';
 
 const repoRoot = path.resolve(import.meta.dirname, '../../');
 const hookPath = path.join(repoRoot, 'claude-code-hook/index.ts');
@@ -348,6 +350,128 @@ describe('runHook — audit durability (record present on disk by the time runHo
     assert.equal(onDisk.length, 1);
     assert.equal(onDisk[0]?.action, outcome.verdict?.action);
     assert.equal(onDisk[0]?.decision, outcome.verdict?.decision);
+  });
+});
+
+class CountingCalibrationCorpus extends CalibrationCorpus {
+  calls = 0;
+  override list(): CalibrationEntry[] {
+    this.calls += 1;
+    return super.list();
+  }
+}
+
+function calibrationEntryInput(overrides: Partial<CalibrationEntry> = {}) {
+  return {
+    tag: overrides.tag ?? 'git push --force origin main',
+    severity: overrides.severity ?? ('critical' as const),
+    exemplar: overrides.exemplar ?? 'Force-pushing to main destroys shared history; always deny.',
+  };
+}
+
+function exemplarCapturingEvaluator(
+  name: Vote['evaluator'],
+): { evaluator: EvaluatorPort; captured: (readonly CalibrationEntry[] | undefined)[] } {
+  const captured: (readonly CalibrationEntry[] | undefined)[] = [];
+  return {
+    captured,
+    evaluator: {
+      name,
+      async castVote(_action, _severity, exemplars): Promise<Vote> {
+        captured.push(exemplars);
+        return { evaluator: name, vote: 'allow', rationale: `${name}-allow` };
+      },
+    },
+  };
+}
+
+describe('runHook — shared exemplar selection (spec Requirement: Single Shared Exemplar Selection Per Action)', () => {
+  test('exactly one corpus.list() call per non-trivial action, shared by all 3 evaluators and the verdict', async () => {
+    const dir = tmpAuditDir();
+    const auditSink = new FsAppendAuditSink(dir);
+    const now = new Date('2026-08-12T10:00:00.000Z');
+
+    const corpusDir = fs.mkdtempSync(path.join(os.tmpdir(), 'magi-hook-corpus-'));
+    const corpus = new CountingCalibrationCorpus(corpusDir);
+    corpus.add(calibrationEntryInput(), now);
+
+    const melchior = exemplarCapturingEvaluator('melchior');
+    const balthasar = exemplarCapturingEvaluator('balthasar');
+    const casper = exemplarCapturingEvaluator('casper');
+
+    const action = normalizeToProposedAction(
+      { tool_name: 'Bash', tool_input: { command: 'git push --force origin main' } },
+      'shadow',
+    );
+
+    const outcome = await runHook(action, {
+      auditSink,
+      now,
+      corpus,
+      evaluators: [melchior.evaluator, balthasar.evaluator, casper.evaluator],
+    });
+
+    assert.equal(corpus.calls, 1, 'exactly one corpus.list() call per non-trivial action');
+    assert.equal(melchior.captured.length, 1);
+    assert.equal(balthasar.captured.length, 1);
+    assert.equal(casper.captured.length, 1);
+    assert.deepEqual(melchior.captured[0], balthasar.captured[0]);
+    assert.deepEqual(balthasar.captured[0], casper.captured[0]);
+    assert.equal(melchior.captured[0]?.length, 1);
+
+    assert.deepEqual(
+      outcome.verdict?.exemplarIds,
+      melchior.captured[0]?.map((e) => e.contentHash),
+      'exemplarIds in the resulting verdict must equal the retrieved exemplars\' contentHash[]',
+    );
+    assert.notEqual(outcome.verdict?.calibrationCorpusHash, '');
+  });
+
+  test('zero corpus.list() calls for a trivial action — the corpus is never touched', async () => {
+    const dir = tmpAuditDir();
+    const auditSink = new FsAppendAuditSink(dir);
+    const now = new Date('2026-08-12T10:00:00.000Z');
+
+    const corpusDir = fs.mkdtempSync(path.join(os.tmpdir(), 'magi-hook-corpus-'));
+    const corpus = new CountingCalibrationCorpus(corpusDir);
+    corpus.add(calibrationEntryInput(), now);
+
+    const melchiorSpy = countingEvaluator('melchior', 'deny');
+
+    const action = normalizeToProposedAction({ tool_name: 'Read', tool_input: { file_path: '/tmp/foo.txt' } }, 'shadow');
+    await runHook(action, {
+      auditSink,
+      now,
+      corpus,
+      evaluators: [melchiorSpy.evaluator, melchiorSpy.evaluator, melchiorSpy.evaluator],
+    });
+
+    assert.equal(corpus.calls, 0, 'a trivial action must never read the calibration corpus');
+  });
+
+  test('an empty corpus still produces exemplarIds:[] and a real (non-"") empty-snapshot calibrationCorpusHash', async () => {
+    const dir = tmpAuditDir();
+    const auditSink = new FsAppendAuditSink(dir);
+    const now = new Date('2026-08-12T10:00:00.000Z');
+
+    const corpusDir = fs.mkdtempSync(path.join(os.tmpdir(), 'magi-hook-corpus-empty-'));
+    const corpus = new CountingCalibrationCorpus(corpusDir);
+
+    const melchior = exemplarCapturingEvaluator('melchior');
+    const balthasar = exemplarCapturingEvaluator('balthasar');
+    const casper = exemplarCapturingEvaluator('casper');
+
+    const action = normalizeToProposedAction({ tool_name: 'Bash', tool_input: { command: 'npm install' } }, 'shadow');
+    const outcome = await runHook(action, {
+      auditSink,
+      now,
+      corpus,
+      evaluators: [melchior.evaluator, balthasar.evaluator, casper.evaluator],
+    });
+
+    assert.equal(corpus.calls, 1);
+    assert.deepEqual(outcome.verdict?.exemplarIds, []);
+    assert.equal(outcome.verdict?.calibrationCorpusHash, '', 'an empty corpus snapshot hash is genuinely "" per computeCorpusSnapshotHash');
   });
 });
 

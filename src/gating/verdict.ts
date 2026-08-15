@@ -41,20 +41,40 @@ function describeAction(action: ProposedAction): string {
 }
 
 /**
+ * Structural subset of `ExemplarSelection`
+ * (`src/calibration/exemplar-injection.ts`) — declared locally, deliberately
+ * NOT imported, so `verdict.ts` never pulls in that fs-bearing module
+ * (which is only ever imported by `runHook`, per
+ * `sdd/magi-calibration-live-wiring/design`). Any real `ExemplarSelection`
+ * value returned by `resolveExemplarSelection` satisfies this shape
+ * structurally, so `runHook` passing one through unchanged still
+ * typechecks.
+ */
+interface ExemplarSelectionLike {
+  readonly exemplars: readonly { readonly contentHash: string }[];
+  readonly corpusHash: string;
+}
+
+const EMPTY_EXEMPLAR_SELECTION: ExemplarSelectionLike = { exemplars: [], corpusHash: '' };
+
+/**
  * Combines the orchestrator-owned severity classification
  * (`src/gating/severity.ts`) with quorum consensus resolution
  * (`src/gating/consensus.ts`) into a single verdict record.
  *
- * `calibrationCorpusHash` and `exemplarIds` are passthrough placeholders in
- * this PR — real calibration-corpus lookup lands with the calibration
- * corpus itself in a later PR (Phase 8). This function only proves the
- * verdict shape carries those fields through unchanged; it does not
- * perform any real calibration lookup.
+ * `selection` is an additive 4th param (default `EMPTY_EXEMPLAR_SELECTION`)
+ * populating `calibrationCorpusHash`/`exemplarIds` with the real,
+ * once-per-action corpus snapshot hash and retrieved-exemplar content
+ * hashes `runHook` resolves via `resolveExemplarSelection` — replacing the
+ * previous `''`/`[]` placeholders. Every existing 3-arg call site (e.g.
+ * `tests/gating/verdict.test.ts`) keeps compiling and behaving unchanged
+ * against this default.
  */
 export function assembleVerdict(
   action: ProposedAction,
   severity: SeverityTier,
   votes: [Vote, Vote, Vote],
+  selection: ExemplarSelectionLike = EMPTY_EXEMPLAR_SELECTION,
 ): Verdict {
   return {
     actor: action.actor,
@@ -63,7 +83,7 @@ export function assembleVerdict(
     severity,
     votes,
     decision: resolveConsensus(votes, severity),
-    calibrationCorpusHash: '',
-    exemplarIds: [],
+    calibrationCorpusHash: selection.corpusHash,
+    exemplarIds: selection.exemplars.map((exemplar) => exemplar.contentHash),
   };
 }
