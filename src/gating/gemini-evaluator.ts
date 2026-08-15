@@ -1,9 +1,11 @@
 import { z } from 'zod';
 import { VoteDecisionSchema } from './consensus.ts';
+import { formatExemplarsForPrompt } from '../calibration/exemplar-prompt.ts';
 import type { Evaluator as EvaluatorName, Vote } from './consensus.ts';
 import type { ProposedAction, SeverityTier } from './proposed-action.ts';
 import type { EvaluatorPort } from './evaluator-port.ts';
 import type { CalibrationFacet } from './anthropic-evaluator.ts';
+import type { CalibrationEntry } from '../calibration/corpus-schema.ts';
 
 /**
  * Sync-tier concrete `EvaluatorPort` backed by Google's Gemini
@@ -167,13 +169,13 @@ export class GeminiEvaluator implements EvaluatorPort {
       new FetchGeminiClient(options.apiKey ?? process.env.GEMINI_API_KEY, options.baseUrl ?? DEFAULT_BASE_URL, this.model);
   }
 
-  async castVote(action: ProposedAction, severity: SeverityTier): Promise<Vote> {
+  async castVote(action: ProposedAction, severity: SeverityTier, exemplars?: readonly CalibrationEntry[]): Promise<Vote> {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), this.timeoutMs);
     try {
       const response = await this.client.create(
         {
-          contents: [{ role: 'user', parts: [{ text: this.buildUserPrompt(action, severity) }] }],
+          contents: [{ role: 'user', parts: [{ text: this.buildUserPrompt(action, severity, exemplars) }] }],
           systemInstruction: { parts: [{ text: this.buildSystemPrompt() }] },
           tools: [{ functionDeclarations: [CAST_VOTE_DECLARATION] }],
           toolConfig: { functionCallingConfig: { mode: 'ANY' } },
@@ -223,7 +225,7 @@ export class GeminiEvaluator implements EvaluatorPort {
     ].join('\n');
   }
 
-  private buildUserPrompt(action: ProposedAction, severity: SeverityTier): string {
+  private buildUserPrompt(action: ProposedAction, severity: SeverityTier, exemplars?: readonly CalibrationEntry[]): string {
     const lines = [
       `Actor: ${action.actor}`,
       `Action type: ${action.actionType}`,
@@ -236,6 +238,11 @@ export class GeminiEvaluator implements EvaluatorPort {
     } else {
       lines.push(`Pipeline id: ${action.pipelineId}`);
     }
+    // Byte-identical-prompt guarantee: see anthropic-evaluator.ts's
+    // identical comment — `formatExemplarsForPrompt` is a true no-op on an
+    // empty/absent exemplar set.
+    const exemplarBlock = formatExemplarsForPrompt(exemplars ?? []);
+    if (exemplarBlock) lines.push(exemplarBlock);
     lines.push('Cast your vote (allow / deny / abstain) with a rationale via the cast_vote tool.');
     return lines.join('\n');
   }

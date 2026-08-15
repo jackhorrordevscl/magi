@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { GroqEvaluator } from '../../src/gating/groq-evaluator.ts';
 import type { GroqChatClient } from '../../src/gating/groq-evaluator.ts';
 import type { CodingAgentAction } from '../../src/gating/proposed-action.ts';
+import type { CalibrationEntry } from '../../src/calibration/corpus-schema.ts';
 
 function action(overrides: Partial<CodingAgentAction> = {}): CodingAgentAction {
   return {
@@ -219,6 +220,85 @@ describe('GroqEvaluator — fail-closed on timeout/error/non-2xx, never allow', 
     const evaluator = new GroqEvaluator('casper', FACET, { client, timeoutMs: 15 });
     const vote = await evaluator.castVote(action(), 'high');
     assert.equal(vote.vote, 'deny');
+  });
+});
+
+function calibrationEntry(overrides: Partial<CalibrationEntry> = {}): CalibrationEntry {
+  return {
+    tag: 'force-push-protected-branch',
+    severity: 'critical',
+    exemplar: 'Force-pushing to main destroys shared history for everyone else on the team; always deny.',
+    contentHash: 'a'.repeat(64),
+    createdAt: '2026-08-12T00:00:00.000Z',
+    ...overrides,
+  };
+}
+
+function baselineUserPrompt(a: CodingAgentAction, severity: string): string {
+  return [
+    `Actor: ${a.actor}`,
+    `Action type: ${a.actionType}`,
+    `Target: ${a.target}`,
+    `Environment: ${a.environment}`,
+    `Severity (orchestrator-classified): ${severity}`,
+    `Command: ${a.command}`,
+    'Cast your vote (allow / deny / abstain) with a rationale via the cast_vote tool.',
+  ].join('\n');
+}
+
+describe('GroqEvaluator — exemplar injection (byte-identical-prompt guarantee)', () => {
+  test('empty/absent exemplars produce a prompt byte-identical to the pre-change baseline', async () => {
+    let capturedContent: unknown;
+    const client: GroqChatClient = {
+      create: async (body) => {
+        capturedContent = body.messages[1]?.content;
+        return toolCallResponse({ vote: 'allow', rationale: 'ok' }) as never;
+      },
+    };
+    const evaluator = new GroqEvaluator('melchior', FACET, { client });
+    const a = action();
+    await evaluator.castVote(a, 'high', []);
+
+    const baseline = baselineUserPrompt(a, 'high');
+    assert.equal(capturedContent, baseline);
+    assert.equal((capturedContent as string).length, baseline.length);
+  });
+
+  test('omitting the exemplars parameter entirely is identical to passing an empty array', async () => {
+    let capturedContent: unknown;
+    const client: GroqChatClient = {
+      create: async (body) => {
+        capturedContent = body.messages[1]?.content;
+        return toolCallResponse({ vote: 'allow', rationale: 'ok' }) as never;
+      },
+    };
+    const evaluator = new GroqEvaluator('melchior', FACET, { client });
+    const a = action();
+    await evaluator.castVote(a, 'high');
+
+    assert.equal(capturedContent, baselineUserPrompt(a, 'high'));
+  });
+
+  test('non-empty exemplars append the formatted block before the cast-vote instruction', async () => {
+    let capturedContent: unknown;
+    const client: GroqChatClient = {
+      create: async (body) => {
+        capturedContent = body.messages[1]?.content;
+        return toolCallResponse({ vote: 'allow', rationale: 'ok' }) as never;
+      },
+    };
+    const evaluator = new GroqEvaluator('melchior', FACET, { client });
+    const a = action();
+    await evaluator.castVote(a, 'high', [calibrationEntry()]);
+
+    const content = capturedContent as string;
+    assert.match(content, /Operator calibration exemplars/);
+    assert.match(content, /\[1\] tag: force-push-protected-branch \| severity: critical/);
+    assert.match(content, /Force-pushing to main destroys shared history/);
+    assert.ok(
+      content.indexOf('Operator calibration exemplars') < content.indexOf('Cast your vote'),
+      'exemplar block must appear before the cast-vote instruction',
+    );
   });
 });
 
