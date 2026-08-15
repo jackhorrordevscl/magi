@@ -22,7 +22,7 @@
     "@eslint/js": "^10.0.1",
     "@types/blessed": "^0.1.27",
     "@types/node": "^22.10.2",
-    "esbuild": "^0.24.2",
+    "esbuild": "^0.28.2",
     "eslint": "^10.8.1",
     "globals": "^17.11.0",
     "typescript": "^5.7.2",
