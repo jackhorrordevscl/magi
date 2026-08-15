@@ -362,6 +362,29 @@ Importante: el "deny-rate proxy" NO es una tasa de falsos positivos real — MAG
 
 Ver sección 8.
 
+### `magi tui`
+
+TUI interactiva (`blessed`, `src/cli/tui/app.ts`) para editar la sección `evaluators` de `magi.config.json` y revisar los denies del audit log sin salir de la terminal — la alternativa a editar el JSON a mano descrita en la sección 4.
+
+```
+$ magi tui
+```
+
+Dos pantallas, `Tab`/`1`/`2` para alternar:
+
+- **Evaluators** — lista de `melchior`/`balthasar`/`casper` a la izquierda, sus cuatro campos (`backend`/`model`/`timeoutMs`/`maxTokens`) a la derecha. `↑↓`/`j`/`k` mueve el cursor de campo, `←→`/`h`/`l` cambia de evaluador, `Enter` edita el campo seleccionado (un picker para `backend`, un textbox para el resto), `d` lo limpia (vuelve a "sin setear", cae al default). Un campo sin setear se muestra atenuado como `(default: <valor efectivo>)` — el mismo cálculo backend-aware de la sección 4, nunca el valor hardcoded de otro backend.
+- **Audit** — el resumen de `magi audit stats` arriba, la lista de registros `deny` individuales (hash/seq/timestamp/severidad) abajo, más reciente primero, `Enter` abre un detalle de solo lectura (actor/acción/votos).
+
+Validación al editar es **estricta**: reusa el mismo schema que `src/gating/evaluator-config.ts` (`EvaluatorsConfigSchema`), así que un valor que la TUI acepta y uno que el loader acepta nunca pueden divergir — un valor inválido se rechaza ahí mismo, en el campo, en rojo, en vez de guardarse y recién avisarte por `stderr` en el próximo arranque del proceso (como sí hace el loader con un `magi.config.json` editado a mano).
+
+`s` guarda — reemplaza únicamente la clave `evaluators`, preserva `tiers`/`paths`/`_note`/cualquier otra clave del archivo byte-por-byte, con escritura atómica (archivo temporal + rename). Si `magi.config.json` no existe o no es JSON válido, guardar queda **deshabilitado** — la TUI nunca escribe sobre un archivo que no pudo parsear, y te lo dice en la barra de estado. `r` descarta los cambios pendientes y recarga del disco. `q` pide confirmación si hay cambios sin guardar.
+
+Todo lo que la sección 4 marca como imposible de configurar (`apiKey`, `baseUrl`, `mode`) sigue siendo estructuralmente imposible de tocar desde acá — la TUI nunca lee ni escribe esos campos, en ningún camino.
+
+Es de solo-lectura sobre el audit log: nunca escribe en `.magi/audit/`, no hay override desde la TUI — para eso seguí usando `magi audit override` (sección 8), que es el único lugar donde ese contrato append-only con reason obligatorio vive.
+
+`blessed` se importa de forma perezosa (`await import('blessed')` dentro de `runTui()`) y queda `external` en el bundle de esbuild — ningún otro subcomando de `magi` paga el costo de cargar una librería de terminal.
+
 ---
 
 ## 8. El override humano auditado

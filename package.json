@@ -14,9 +14,11 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.32.1",
+    "blessed": "^0.1.81",
     "zod": "^3.23.8"
   },
   "devDependencies": {
+    "@types/blessed": "^0.1.27",
     "@types/node": "^22.10.2",
     "esbuild": "^0.24.2",
     "typescript": "^5.7.2"

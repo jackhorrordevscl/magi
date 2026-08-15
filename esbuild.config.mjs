@@ -30,6 +30,13 @@ await build({
   banner: { js: '#!/usr/bin/env node' },
   sourcemap: true,
   minify: false,
+  // `blessed` (the TUI's terminal library, loaded lazily via `await
+  // import('blessed')` inside `runTui()` — src/cli/tui/app.ts) resolves its
+  // widgets with a dynamic `require('./widgets/' + name)` that esbuild
+  // cannot statically walk. `external` keeps it out of the bundle entirely
+  // (never inlined, never loaded until `magi tui` actually runs) rather than
+  // `packages: 'external'`, which would also eject `zod`/`@anthropic-ai/sdk`.
+  external: ['blessed'],
 });
 
 console.log(`[esbuild.config] Bundled ${entry} -> ${outfile}`);

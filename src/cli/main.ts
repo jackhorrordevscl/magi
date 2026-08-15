@@ -26,6 +26,7 @@ import type { EvaluatorPort } from '../gating/evaluator-port.ts';
  *   magi audit verify                     — replay + verify the hash chain
  *   magi audit stats                      — verdict distribution / deny-rate proxy
  *   magi audit override <hash> --reason "<why>" — document that a deny should be disregarded (append-only, non-mutating)
+ *   magi tui                              — interactive evaluator-config / audit-summary TUI (src/cli/tui/app.ts)
  *
  * `runMain` is the testable dispatch function (returns an exit code rather
  * than calling `process.exit` itself); the bottom-of-file guard is the real
@@ -71,6 +72,12 @@ function loadConfig(configPath = 'magi.config.json'): MagiConfig {
   return JSON.parse(fs.readFileSync(configPath, 'utf8')) as MagiConfig;
 }
 
+/** `magi tui`'s entrypoint options — `src/cli/tui/app.ts`'s `runTui`. */
+export interface TuiOptions {
+  configPath: string;
+  auditDir: string;
+}
+
 export interface MainDeps {
   io?: MainIO;
   configPath?: string;
@@ -78,6 +85,14 @@ export interface MainDeps {
   corpus?: CalibrationCorpus;
   calibrateIO?: CalibrateIO;
   evaluators?: readonly [EvaluatorPort, EvaluatorPort, EvaluatorPort];
+  /**
+   * Testability seam for `magi tui` (design decision 10,
+   * `sdd/magi-evaluator-config-tui/design`): when provided, `runMain`
+   * dispatches to this instead of `await import('./tui/app.ts')`'s real
+   * `runTui`, so `tests/cli/main.test.ts` can prove the dispatch branch —
+   * including that nothing above it ever loads `blessed` — with no tty.
+   */
+  tui?: (options: TuiOptions) => Promise<number>;
 }
 
 /**
@@ -102,9 +117,16 @@ export async function runMain(argv: string[], deps: MainDeps = {}): Promise<numb
     return runAuditCommand(subcommand, rest, auditDir, io);
   }
 
+  if (command === 'tui') {
+    // Lazily imported here so `blessed` (loaded inside `runTui()` itself —
+    // see `src/cli/tui/app.ts`) never touches any other `magi` subcommand.
+    const runTui = deps.tui ?? (await import('./tui/app.ts')).runTui;
+    return runTui({ configPath: deps.configPath ?? 'magi.config.json', auditDir });
+  }
+
   io.error(
     'Usage: magi <calibrate [import <file> | verify --fixtures <file>] | ' +
-      'audit <verify | stats | override <hash> --reason "<why>">>',
+      'audit <verify | stats | override <hash> --reason "<why>"> | tui>',
   );
   return 1;
 }

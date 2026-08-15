@@ -285,6 +285,7 @@ El binario `magi` (`src/cli/main.ts`, empaquetado a `dist/magi.mjs` por
 | `magi audit verify` | Reproduce la cadena de hash bajo `.magi/audit/` y reporta si está intacta (a prueba de manipulación, no infalible ante manipulación — ver `src/audit/verify.ts`). Verifica una cadena que mezcla registros de veredicto y de anulación de forma idéntica a una cadena de solo veredictos. |
 | `magi audit stats` | Reporta la distribución de veredictos (conteos por decisión, por nivel de severidad), un proxy bruto de tasa de deny para el período de evaluación, y el conteo/tasa de anulaciones como métrica separada. |
 | `magi audit override <hash> --reason "<why>"` | Documenta que el registro de deny que coincide con `<hash>` debe ser descartado — append-only, no mutante, requiere un `--reason` no vacío, solo acepta un objetivo `deny`. No escribe nada en ningún camino de rechazo. |
+| `magi tui` | Interfaz de terminal interactiva (`blessed`) para editar la sección `evaluators` de la config y navegar los denies del audit log sin salir de la terminal — ver [MANUAL.md](MANUAL.md) §7. |
 
 El corpus de calibración (`.magi/calibration/`) y el log de auditoría
 (`.magi/audit/`) son ambos solo-local y ya están excluidos vía
@@ -334,14 +335,6 @@ adaptador — que siempre falla abierto) reporta `"allow"`.
 
 ## Qué sigue — exploración en curso, aún sin planificar
 
-Se hizo una exploración (sin propuesta, spec, diseño ni código todavía)
-sobre un futuro cambio de dos partes: (a) una capa de archivo de
-configuración que permita fijar el modelo/backend/timeout de cada
-evaluador vía un archivo de configuración en lugar de los literales
-hardcodeados actualmente en `melchior.ts`/`balthasar.ts`/`casper.ts`, y
-(b) una interfaz de terminal (TUI) construida sobre readline/ANSI plano —
-deliberadamente no un framework como `ink`/`blessed`, para mantener la
-convención de dependencias mínimas del proyecto — que leería/escribiría
-esa configuración y renderizaría `magi audit stats` de forma interactiva.
-Ninguna de las dos partes está aprobada ni planificada; esto es solo
-exploración, no un compromiso.
+`codegraph-context-in-evaluators` y un adaptador para OpenCode fueron
+mencionados de pasada, pero ninguno de los dos pasó todavía por
+exploración formal — nada aprobado ni planificado por ahora.

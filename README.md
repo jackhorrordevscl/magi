@@ -264,6 +264,7 @@ The `magi` binary (`src/cli/main.ts`, bundled to `dist/magi.mjs` by
 | `magi audit verify` | Replays the hash chain under `.magi/audit/` and reports whether it is intact (tamper-evident, not tamper-proof — see `src/audit/verify.ts`). Verifies a chain mixing verdict and override records identically to a verdict-only chain. |
 | `magi audit stats` | Reports verdict distribution (counts per decision, per severity tier), a raw deny-rate proxy for the evaluation period, and override count/rate as a separate metric. |
 | `magi audit override <hash> --reason "<why>"` | Documents that the deny record matching `<hash>` should be disregarded — append-only, non-mutating, requires a non-empty `--reason`, only accepts a `deny` target. Writes nothing on any rejection path. |
+| `magi tui` | Interactive terminal UI (`blessed`) for editing the `evaluators` config section and browsing audit denies without leaving the terminal — see [MANUAL.md](MANUAL.md) §7. |
 
 The calibration corpus (`.magi/calibration/`) and audit log
 (`.magi/audit/`) are both local-only and already excluded via
@@ -310,12 +311,6 @@ always fails open) reports `"allow"`.
 
 ## What's next — exploration in progress, not yet scoped
 
-An exploration (not a proposal, spec, design, or any code yet) has looked
-at a future two-part change: (a) a config-file layer letting each
-evaluator's model/backend/timeout be set via a config file instead of the
-hardcoded literals currently in `melchior.ts`/`balthasar.ts`/`casper.ts`,
-and (b) a terminal UI built on plain readline/ANSI — deliberately not a
-framework like `ink`/`blessed`, to keep the project's minimal-dependency
-convention — that would read/write that config and render `magi audit
-stats` interactively. Neither part is approved or scheduled; this is
-exploration-only, not a commitment.
+`codegraph-context-in-evaluators` and an OpenCode adapter have both been
+mentioned in passing but never taken through exploration — nothing
+approved or scheduled yet.

@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { runMain } from '../../src/cli/main.ts';
-import type { MainIO } from '../../src/cli/main.ts';
+import type { MainIO, TuiOptions } from '../../src/cli/main.ts';
 import { FsAppendAuditSink } from '../../src/audit/fs-append-sink.ts';
 import { CalibrationCorpus } from '../../src/calibration/corpus.ts';
 import type { Verdict } from '../../src/gating/verdict.ts';
@@ -208,6 +208,55 @@ describe('runMain — config loading without a "mode" key', () => {
     const code = await runMain(['audit', 'stats'], { io, configPath });
     assert.equal(code, 0);
     assert.ok(out.some((l) => l.includes('Total gated records')));
+  });
+});
+
+describe('runMain — tui dispatch (design decision 10: MainDeps.tui testability seam)', () => {
+  test('"magi tui" routes to the injected deps.tui stub, never touching a real screen', async () => {
+    const { io } = capturingIO();
+    let received: TuiOptions | undefined;
+    const code = await runMain(['tui'], {
+      io,
+      configPath: 'a-magi-config.json',
+      auditDir: '.magi/audit',
+      tui: async (options) => {
+        received = options;
+        return 0;
+      },
+    });
+    assert.equal(code, 0);
+    assert.deepEqual(received, { configPath: 'a-magi-config.json', auditDir: '.magi/audit' });
+  });
+
+  test('the injected deps.tui stub\'s exit code passes through unchanged', async () => {
+    const { io } = capturingIO();
+    const code = await runMain(['tui'], { io, tui: async () => 1 });
+    assert.equal(code, 1);
+  });
+
+  test('without an injected deps.tui, "magi tui" resolves configPath/auditDir the same way as every other command', async () => {
+    const dir = tmpDir('magi-main-tui-defaults-');
+    const configPath = path.join(dir, 'magi.config.json');
+    fs.writeFileSync(
+      configPath,
+      JSON.stringify({
+        tiers: { sync: { k: 5 }, async: { k: 12 }, divergenceFloorPercent: 40 },
+        paths: { calibrationDir: '.magi/calibration/', auditDir: '.magi/audit/' },
+      }),
+    );
+
+    const { io } = capturingIO();
+    let received: TuiOptions | undefined;
+    const code = await runMain(['tui'], {
+      io,
+      configPath,
+      tui: async (options) => {
+        received = options;
+        return 0;
+      },
+    });
+    assert.equal(code, 0);
+    assert.deepEqual(received, { configPath, auditDir: '.magi/audit/' });
   });
 });
 
