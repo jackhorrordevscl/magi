@@ -160,7 +160,12 @@ describe('runAuditOverride — success path', () => {
     const dayFile = path.join(dir, '2026-08-13.jsonl');
     const beforeLines = fs.readFileSync(dayFile, 'utf8').split('\n').filter((l) => l.trim().length > 0);
 
-    runAuditOverride({ auditDir: dir, targetHash: target.hash, reason: 'ok' });
+    runAuditOverride({
+      auditDir: dir,
+      targetHash: target.hash,
+      reason: 'ok',
+      now: new Date('2026-08-13T10:05:00.000Z'),
+    });
 
     const afterLines = fs.readFileSync(dayFile, 'utf8').split('\n').filter((l) => l.trim().length > 0);
     assert.equal(afterLines[0], beforeLines[0]);
