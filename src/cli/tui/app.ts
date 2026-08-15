@@ -200,7 +200,7 @@ export async function runTui(options: RunTuiOptions): Promise<number> {
   });
 
   const statusBox: Widgets.BoxElement = blessed.box({ parent: screen, bottom: 1, left: 0, width: '100%', height: 1, tags: true });
-  const helpHintBox: Widgets.BoxElement = blessed.box({
+  blessed.box({
     parent: screen,
     bottom: 0,
     left: 0,

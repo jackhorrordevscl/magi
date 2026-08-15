@@ -118,7 +118,7 @@ function canonicalStringify(value: unknown): string {
  * NOT distribute, it silently collapses to the common-keys case above. Going
  * through `Distribute<T>` first makes `T` a naked parameter, which does.
  */
-type Distribute<T, K extends keyof any> = T extends infer R ? Omit<R, K & keyof R> : never;
+type Distribute<T, K extends PropertyKey> = T extends infer R ? Omit<R, K & keyof R> : never;
 /**
  * Exported so `fs-append-sink.ts`'s shared generic `appendRecord<T>` can
  * assert its per-call content into this shape at the single point where it
