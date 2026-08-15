@@ -81,12 +81,10 @@ export interface AnthropicMessagesClient {
  * evaluator role from spec Requirement: Evaluator Vote Contract (fact/
  * consistency, blast radius + policy, actor risk/anomaly) — not a
  * fabricated "persona". Real per-operator calibration (top-K exemplars
- * retrieved from the calibration corpus, see `src/calibration/`) is a
- * documented forward-looking gap: this PR wires the static facet text into
- * the system prompt only; live exemplar injection is deferred until the
- * corpus has real content and the full pipeline is assembled (Phase 9+),
- * matching the same passthrough-placeholder pattern `assembleVerdict`
- * already established for `calibrationCorpusHash`/`exemplarIds` (PR2).
+ * retrieved from the calibration corpus, see `src/calibration/`) is now
+ * live: `runHook` resolves one exemplar selection per action and threads it
+ * into `castVote`'s `exemplars` param, formatted into the prompt alongside
+ * this static facet text (see `magi-calibration-live-wiring`).
  */
 export interface CalibrationFacet {
   /** Short label for this facet, e.g. "fact/consistency". */
