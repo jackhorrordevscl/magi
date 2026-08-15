@@ -3,8 +3,8 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
-import { CalibrationCorpus, computeContentHash } from '../../src/calibration/corpus.ts';
-import type { CalibrationEntryInput } from '../../src/calibration/corpus-schema.ts';
+import { CalibrationCorpus, computeContentHash, computeCorpusSnapshotHash } from '../../src/calibration/corpus.ts';
+import type { CalibrationEntry, CalibrationEntryInput } from '../../src/calibration/corpus-schema.ts';
 
 function tmpDir(): string {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'magi-calibration-'));
@@ -94,5 +94,63 @@ describe('CalibrationCorpus — add/list', () => {
     corpus.add(entryInput(), now);
     assert.equal(corpus.has(entryInput()), true);
     assert.equal(corpus.has(entryInput({ tag: 'different' })), false);
+  });
+});
+
+function snapshotEntry(overrides: Partial<CalibrationEntry> = {}): CalibrationEntry {
+  return {
+    tag: 'generic',
+    severity: 'low',
+    exemplar: 'exemplar text',
+    contentHash: '0'.repeat(64),
+    createdAt: '2026-08-12T00:00:00.000Z',
+    ...overrides,
+  };
+}
+
+describe('computeCorpusSnapshotHash — digest-of-digests over the full corpus snapshot', () => {
+  test('empty entries array -> "" (D3 audit-hash correctness)', () => {
+    assert.equal(computeCorpusSnapshotHash([]), '');
+  });
+
+  test('same entries always produce the same hash (determinism)', () => {
+    const entries = [
+      snapshotEntry({ contentHash: 'a'.repeat(64) }),
+      snapshotEntry({ contentHash: 'b'.repeat(64) }),
+    ];
+    assert.equal(computeCorpusSnapshotHash(entries), computeCorpusSnapshotHash(entries));
+  });
+
+  test('input-order invariance: shuffling entries does not change the hash', () => {
+    const entries = [
+      snapshotEntry({ contentHash: 'a'.repeat(64) }),
+      snapshotEntry({ contentHash: 'b'.repeat(64) }),
+      snapshotEntry({ contentHash: 'c'.repeat(64) }),
+    ];
+    const shuffled = [entries[2], entries[0], entries[1]] as CalibrationEntry[];
+    assert.equal(computeCorpusSnapshotHash(entries), computeCorpusSnapshotHash(shuffled));
+  });
+
+  test('createdAt invariance: differing createdAt values on otherwise-identical contentHash sets produce the same hash', () => {
+    const entriesA = [
+      snapshotEntry({ contentHash: 'a'.repeat(64), createdAt: '2020-01-01T00:00:00.000Z' }),
+      snapshotEntry({ contentHash: 'b'.repeat(64), createdAt: '2020-01-01T00:00:00.000Z' }),
+    ];
+    const entriesB = [
+      snapshotEntry({ contentHash: 'a'.repeat(64), createdAt: '2026-08-12T10:00:00.000Z' }),
+      snapshotEntry({ contentHash: 'b'.repeat(64), createdAt: '2026-08-12T10:00:00.000Z' }),
+    ];
+    assert.equal(computeCorpusSnapshotHash(entriesA), computeCorpusSnapshotHash(entriesB));
+  });
+
+  test('a different set of contentHash values produces a different hash', () => {
+    const a = computeCorpusSnapshotHash([snapshotEntry({ contentHash: 'a'.repeat(64) })]);
+    const b = computeCorpusSnapshotHash([snapshotEntry({ contentHash: 'b'.repeat(64) })]);
+    assert.notEqual(a, b);
+  });
+
+  test('hash is a 64-char lowercase hex sha256 digest', () => {
+    const hash = computeCorpusSnapshotHash([snapshotEntry({ contentHash: 'a'.repeat(64) })]);
+    assert.match(hash, /^[0-9a-f]{64}$/);
   });
 });
