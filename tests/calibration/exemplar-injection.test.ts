@@ -112,7 +112,7 @@ describe('resolveExemplarSelection — total, never throws (D4 containment)', ()
     });
 
     assert.deepEqual(result, EMPTY_SELECTION);
-    assert.match(stderr, /calibration corpus unavailable/i);
+    assert.match(stderr, /calibration entry unreadable, skipping/i);
   });
 });
 
@@ -152,7 +152,7 @@ describe('resolveExemplarSelection — distinguishing empty corpus from failed r
     assert.deepEqual(emptyResult?.exemplars, []);
     assert.deepEqual(corruptResult?.exemplars, []);
     assert.equal(emptyStderr, '');
-    assert.match(corruptStderr, /calibration corpus unavailable/i);
+    assert.match(corruptStderr, /calibration entry unreadable, skipping/i);
   });
 });
 

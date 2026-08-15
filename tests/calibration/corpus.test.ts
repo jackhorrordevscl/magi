@@ -10,6 +10,22 @@ function tmpDir(): string {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'magi-calibration-'));
 }
 
+async function captureStderr(fn: () => void | Promise<void>): Promise<string> {
+  const original = process.stderr.write.bind(process.stderr);
+  let buffer = '';
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  (process.stderr as any).write = (chunk: unknown) => {
+    buffer += typeof chunk === 'string' ? chunk : String(chunk);
+    return true;
+  };
+  try {
+    await fn();
+  } finally {
+    process.stderr.write = original;
+  }
+  return buffer;
+}
+
 function entryInput(overrides: Partial<CalibrationEntryInput> = {}): CalibrationEntryInput {
   return {
     tag: 'force-push-protected-branch',
@@ -72,6 +88,25 @@ describe('CalibrationCorpus — add/list', () => {
     const dir = path.join(tmpDir(), 'does-not-exist');
     const corpus = new CalibrationCorpus(dir);
     assert.deepEqual(corpus.list(), []);
+  });
+
+  test('list() skips one corrupt entry file and still returns the other valid entries (per-file isolation)', async () => {
+    const dir = tmpDir();
+    const corpus = new CalibrationCorpus(dir);
+    const now = new Date('2026-08-12T10:00:00.000Z');
+
+    const good1 = corpus.add(entryInput({ tag: 'a' }), now);
+    const good2 = corpus.add(entryInput({ tag: 'b' }), now);
+    fs.writeFileSync(path.join(dir, `${'f'.repeat(64)}.json`), '{ not valid json', 'utf8');
+
+    let entries: CalibrationEntry[] = [];
+    const stderr = await captureStderr(() => {
+      entries = corpus.list();
+    });
+
+    const hashes = entries.map((e) => e.contentHash).sort();
+    assert.deepEqual(hashes, [good1.contentHash, good2.contentHash].sort());
+    assert.match(stderr, /calibration entry unreadable, skipping/i);
   });
 
   test('re-adding byte-identical content is idempotent (content-addressed, not duplicated)', () => {

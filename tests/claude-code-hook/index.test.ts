@@ -498,11 +498,12 @@ describe('runHook — corrupt corpus degrades to zero exemplars end-to-end, neve
     const auditSink = new FsAppendAuditSink(dir);
     const now = new Date('2026-08-12T10:00:00.000Z');
 
-    // A corrupt corpus: a directory containing one malformed JSON entry file,
-    // which makes `CalibrationCorpus.list()` throw (`JSON.parse` failure)
-    // when `resolveExemplarSelection` calls it — this is architecturally
-    // distinct from an evaluator's own fail-closed-to-deny transport-error
-    // catch (see `src/calibration/exemplar-injection.ts`'s doc comment).
+    // A corrupt corpus: a directory containing one malformed JSON entry file
+    // and nothing else. `CalibrationCorpus.list()` skips the unparseable
+    // file (per-file isolation, `JSON.parse` failure caught internally) and
+    // returns an empty entry list — this is architecturally distinct from an
+    // evaluator's own fail-closed-to-deny transport-error catch (see
+    // `src/calibration/exemplar-injection.ts`'s doc comment).
     const corpusDir = fs.mkdtempSync(path.join(os.tmpdir(), 'magi-hook-corrupt-corpus-'));
     fs.writeFileSync(path.join(corpusDir, `${'c'.repeat(64)}.json`), '{ this is not valid json', 'utf8');
     const corpus = new CountingCalibrationCorpus(corpusDir);
@@ -532,7 +533,7 @@ describe('runHook — corrupt corpus degrades to zero exemplars end-to-end, neve
       });
     });
 
-    assert.equal(corpus.calls, 1, 'the corrupt corpus is still read exactly once (the failure happens inside that one call)');
+    assert.equal(corpus.calls, 1, 'the corrupt corpus is still read exactly once (the skip happens inside that one call)');
 
     // (a) resolveExemplarSelection returned an empty selection: every
     // evaluator received exemplars:[] (the same shared selection, per spec
@@ -541,10 +542,10 @@ describe('runHook — corrupt corpus degrades to zero exemplars end-to-end, neve
     assert.deepEqual(balthasar.captured[0], []);
     assert.deepEqual(casper.captured[0], []);
 
-    // (b) a warn-level log occurred (the corrupt-read path, NOT the silent
-    // empty-but-valid-corpus path — see the exemplar-injection.test.ts
+    // (b) a warn-level log occurred (the corrupt-entry-skip path, NOT the
+    // silent empty-but-valid-corpus path — see the exemplar-injection.test.ts
     // "distinguishing empty corpus from failed read" tests).
-    assert.match(stderr, /calibration corpus unavailable/i);
+    assert.match(stderr, /calibration entry unreadable, skipping/i);
 
     // The resulting verdict's calibrationCorpusHash/exemplarIds reflect the
     // same EMPTY_SELECTION-shaped degraded selection as a genuinely empty
