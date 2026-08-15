@@ -477,6 +477,76 @@ describe('runHook — shared exemplar selection (spec Requirement: Single Shared
   });
 });
 
+describe('runHook — RunHookOptions.configPath seam (issue #3: tiers.sync.k must be overridable, not hardcoded to bare process.cwd())', () => {
+  test('a configPath pointing at a custom tiers.sync.k bounds the retrieved exemplars end-to-end through runHook', async () => {
+    const dir = tmpAuditDir();
+    const auditSink = new FsAppendAuditSink(dir);
+    const now = new Date('2026-08-12T10:00:00.000Z');
+
+    const configDir = fs.mkdtempSync(path.join(os.tmpdir(), 'magi-hook-config-'));
+    const configPath = path.join(configDir, 'magi.config.json');
+    fs.writeFileSync(configPath, JSON.stringify({ tiers: { sync: { k: 1 } } }), 'utf8');
+
+    const corpusDir = fs.mkdtempSync(path.join(os.tmpdir(), 'magi-hook-corpus-configpath-'));
+    const corpus = new CountingCalibrationCorpus(corpusDir);
+    corpus.add(calibrationEntryInput({ exemplar: 'exemplar one' }), now);
+    corpus.add(calibrationEntryInput({ exemplar: 'exemplar two' }), now);
+    corpus.add(calibrationEntryInput({ exemplar: 'exemplar three' }), now);
+
+    const melchior = exemplarCapturingEvaluator('melchior');
+    const balthasar = exemplarCapturingEvaluator('balthasar');
+    const casper = exemplarCapturingEvaluator('casper');
+
+    const action = normalizeToProposedAction(
+      { tool_name: 'Bash', tool_input: { command: 'git push --force origin main' } },
+      'shadow',
+    );
+
+    const outcome = await runHook(action, {
+      auditSink,
+      now,
+      corpus,
+      configPath,
+      evaluators: [melchior.evaluator, balthasar.evaluator, casper.evaluator],
+    });
+
+    assert.equal(
+      outcome.verdict?.exemplarIds.length,
+      1,
+      'the configured k=1 (from the overridden configPath) must bound the exemplars, not the default k=5',
+    );
+  });
+
+  test('omitting configPath keeps the pre-existing default-k behavior unchanged (additive seam, back-compat)', async () => {
+    const dir = tmpAuditDir();
+    const auditSink = new FsAppendAuditSink(dir);
+    const now = new Date('2026-08-12T10:00:00.000Z');
+
+    const corpusDir = fs.mkdtempSync(path.join(os.tmpdir(), 'magi-hook-corpus-nodefault-'));
+    const corpus = new CountingCalibrationCorpus(corpusDir);
+    corpus.add(calibrationEntryInput({ exemplar: 'exemplar one' }), now);
+    corpus.add(calibrationEntryInput({ exemplar: 'exemplar two' }), now);
+
+    const melchior = exemplarCapturingEvaluator('melchior');
+    const balthasar = exemplarCapturingEvaluator('balthasar');
+    const casper = exemplarCapturingEvaluator('casper');
+
+    const action = normalizeToProposedAction(
+      { tool_name: 'Bash', tool_input: { command: 'git push --force origin main' } },
+      'shadow',
+    );
+
+    const outcome = await runHook(action, {
+      auditSink,
+      now,
+      corpus,
+      evaluators: [melchior.evaluator, balthasar.evaluator, casper.evaluator],
+    });
+
+    assert.equal(outcome.verdict?.exemplarIds.length, 2, 'no configPath supplied -> default k=5 -> both entries returned');
+  });
+});
+
 /** Captures everything written to `process.stderr` for the duration of `fn` (mirrors `tests/calibration/exemplar-injection.test.ts`'s helper). */
 async function captureStderr(fn: () => void | Promise<void>): Promise<string> {
   const original = process.stderr.write.bind(process.stderr);
