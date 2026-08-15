@@ -3,6 +3,7 @@ import { AuditRecordSchema } from '../audit/record.ts';
 import { resolveConsensus } from './consensus.ts';
 import type { Vote } from './consensus.ts';
 import type { ProposedAction, SeverityTier } from './proposed-action.ts';
+import type { ExemplarSelection } from '../calibration/exemplar-injection.ts';
 
 /**
  * A verdict is the subset of `AuditRecordSchema` known at the moment
@@ -41,22 +42,21 @@ function describeAction(action: ProposedAction): string {
 }
 
 /**
- * Structural subset of `ExemplarSelection`
- * (`src/calibration/exemplar-injection.ts`) — declared locally, deliberately
- * NOT imported, so `verdict.ts` never pulls in that fs-bearing module
- * (which is only ever imported by `runHook`, per
- * `sdd/magi-calibration-live-wiring/design`). Any real `ExemplarSelection`
- * value returned by `resolveExemplarSelection` satisfies this shape
- * structurally, so `runHook` passing one through unchanged still
- * typechecks.
+ * Default when no selection is supplied (e.g. every pre-existing 3-arg
+ * `assembleVerdict` call). Deliberately distinct from `EMPTY_SELECTION`
+ * (`src/calibration/exemplar-injection.ts`), which flags a genuine
+ * corpus-read failure (`degraded: true`) — this default means "no
+ * calibration attempt was made at all", so `degraded` stays `false`.
+ *
+ * `ExemplarSelection` itself is imported `type`-only above: with
+ * `verbatimModuleSyntax: true` (`tsconfig.json`) a type-only import is
+ * erased entirely at emit/strip time, so this does NOT pull the fs-bearing
+ * `exemplar-injection.ts` module (transitively `corpus.ts`/`tiers-config.ts`)
+ * into `verdict.ts`'s runtime import graph — the concern the previous
+ * locally-duplicated `ExemplarSelectionLike` type existed to avoid was
+ * never actually at risk.
  */
-interface ExemplarSelectionLike {
-  readonly exemplars: readonly { readonly contentHash: string }[];
-  readonly corpusHash: string;
-  readonly degraded: boolean;
-}
-
-const EMPTY_EXEMPLAR_SELECTION: ExemplarSelectionLike = { exemplars: [], corpusHash: '', degraded: false };
+const EMPTY_EXEMPLAR_SELECTION: ExemplarSelection = { exemplars: [], corpusHash: '', degraded: false };
 
 /**
  * Combines the orchestrator-owned severity classification
@@ -75,7 +75,7 @@ export function assembleVerdict(
   action: ProposedAction,
   severity: SeverityTier,
   votes: [Vote, Vote, Vote],
-  selection: ExemplarSelectionLike = EMPTY_EXEMPLAR_SELECTION,
+  selection: ExemplarSelection = EMPTY_EXEMPLAR_SELECTION,
 ): Verdict {
   return {
     actor: action.actor,
