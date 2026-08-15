@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { describeError } from '../../shared/log.ts';
 import type { Evaluator as EvaluatorName } from '../../gating/consensus.ts';
 import type { EvaluatorsConfig, EvaluatorSettings } from '../../gating/evaluator-config.ts';
 
@@ -28,10 +29,6 @@ export type ConfigFileRead =
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
-
-function describeError(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
 }
 
 /**

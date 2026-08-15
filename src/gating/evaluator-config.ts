@@ -9,6 +9,7 @@ import { AnthropicEvaluator } from './anthropic-evaluator.ts';
 import type { AnthropicMessagesClient } from './anthropic-evaluator.ts';
 import { GeminiEvaluator } from './gemini-evaluator.ts';
 import type { GeminiClient } from './gemini-evaluator.ts';
+import { warn, describeError } from '../shared/log.ts';
 
 /**
  * Shared config layer consumed by `melchior.ts`/`balthasar.ts`/`casper.ts`
@@ -96,14 +97,6 @@ const configCache = new Map<string, EvaluatorsConfig>();
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
-
-function warn(message: string): void {
-  process.stderr.write(`${message}\n`);
-}
-
-function describeError(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
 }
 
 function warnOnRejectedApiKey(name: (typeof EVALUATOR_NAMES)[number], rawEntry: Record<string, unknown>, configPath: string): void {

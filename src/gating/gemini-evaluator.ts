@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { VoteDecisionSchema } from './consensus.ts';
 import { formatExemplarsForPrompt } from '../calibration/exemplar-prompt.ts';
+import { describeError } from '../shared/log.ts';
 import type { Evaluator as EvaluatorName, Vote } from './consensus.ts';
 import type { ProposedAction, SeverityTier } from './proposed-action.ts';
 import type { EvaluatorPort } from './evaluator-port.ts';
@@ -246,9 +247,4 @@ export class GeminiEvaluator implements EvaluatorPort {
     lines.push('Cast your vote (allow / deny / abstain) with a rationale via the cast_vote tool.');
     return lines.join('\n');
   }
-}
-
-function describeError(error: unknown): string {
-  if (error instanceof Error) return error.message;
-  return String(error);
 }
