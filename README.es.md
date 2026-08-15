@@ -241,10 +241,12 @@ son **placeholders** explícitos, confirmados como aceptables para
 proceder antes de que exista un corpus de calibración real
 (`sdd/magi/design-decisions`):
 
-- **Top-K del selector**: `tiers.sync.k = 5` (usado, una vez que la
-  inyección de calibración esté conectada), `tiers.async.k = 12`
-  (actualmente sin uso — el modo async en sí está fuera de alcance, ver
-  arriba).
+- **Top-K del selector**: `tiers.sync.k = 5` — ya conectado: `runHook`
+  resuelve e inyecta exemplars reales del corpus en el prompt de cada
+  evaluador (ver `sdd/magi-calibration-live-wiring`), así que este valor
+  ya es determinante en cuanto `.magi/calibration/` tenga entradas.
+  `tiers.async.k = 12` sigue sin uso — el modo async en sí está fuera de
+  alcance, ver arriba.
 - **Piso del harness de divergencia**: `tiers.divergenceFloorPercent = 40`
   — la fracción mínima de fixtures diseñados para divergir sobre la que
   las tres facetas evaluadoras deben realmente discrepar para que `magi

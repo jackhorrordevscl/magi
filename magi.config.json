@@ -1,6 +1,6 @@
 {
   "tiers": {
-    "_note": "PLACEHOLDER values per design sdd/magi/design (#1008). Exact tier boundaries and K values are subject to calibration in a later PR and are NOT load-bearing yet in PR1 scope.",
+    "_note": "sync.k IS load-bearing: it bounds live calibration exemplar retrieval in the gating pipeline (see sdd/magi-calibration-live-wiring/design). Exact tier boundaries, async.k, and divergenceFloorPercent remain PLACEHOLDER values per design sdd/magi/design (#1008), subject to calibration in a later PR.",
     "sync": {
       "k": 5
     },

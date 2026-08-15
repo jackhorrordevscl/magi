@@ -1,5 +1,6 @@
 import type { Evaluator as EvaluatorName, Vote } from './consensus.ts';
 import type { ProposedAction, SeverityTier } from './proposed-action.ts';
+import type { CalibrationEntry } from '../calibration/corpus-schema.ts';
 
 /**
  * Port implemented by every concrete evaluator backend that can cast one
@@ -19,8 +20,17 @@ export interface EvaluatorPort {
    * (see `anthropic-evaluator.ts`). `collectVotes` below still guards
    * against an implementation that violates this contract and rejects
    * anyway, as defense in depth.
+   *
+   * `exemplars` is an additive, optional third parameter (per
+   * `sdd/magi-calibration-live-wiring/design`): the shared calibration
+   * exemplar set the pipeline resolved once for this action (see
+   * `resolveExemplarSelection` in `src/calibration/exemplar-injection.ts`),
+   * forwarded unchanged to every evaluator. Existing callers that omit it
+   * (e.g. `divergence-harness.ts`, `cli/calibrate.ts`) remain fully
+   * compatible — every implementor may keep declaring `castVote()` with
+   * fewer params, via TS structural typing.
    */
-  castVote(action: ProposedAction, severity: SeverityTier): Promise<Vote>;
+  castVote(action: ProposedAction, severity: SeverityTier, exemplars?: readonly CalibrationEntry[]): Promise<Vote>;
 }
 
 /**
@@ -39,8 +49,9 @@ export async function collectVotes(
   evaluators: readonly [EvaluatorPort, EvaluatorPort, EvaluatorPort],
   action: ProposedAction,
   severity: SeverityTier,
+  exemplars?: readonly CalibrationEntry[],
 ): Promise<[Vote, Vote, Vote]> {
-  const settled = await Promise.allSettled(evaluators.map((e) => e.castVote(action, severity)));
+  const settled = await Promise.allSettled(evaluators.map((e) => e.castVote(action, severity, exemplars)));
 
   const votes = settled.map((result, index) => {
     if (result.status === 'fulfilled') return result.value;

@@ -4,6 +4,7 @@ import { collectVotes } from '../../src/gating/evaluator-port.ts';
 import type { EvaluatorPort } from '../../src/gating/evaluator-port.ts';
 import type { Vote } from '../../src/gating/consensus.ts';
 import type { CodingAgentAction } from '../../src/gating/proposed-action.ts';
+import type { CalibrationEntry } from '../../src/calibration/corpus-schema.ts';
 
 function action(): CodingAgentAction {
   return {
@@ -111,5 +112,54 @@ describe('collectVotes — Promise.allSettled dispatch across all 3 evaluators',
 
     const votes = await collectVotes(evaluators, action(), 'critical');
     assert.ok(votes.every((v) => v.vote === 'deny'));
+  });
+});
+
+describe('collectVotes — additive exemplars parameter (4th param)', () => {
+  function capturingEvaluator(name: Vote['evaluator']): { evaluator: EvaluatorPort; captured: (readonly CalibrationEntry[] | undefined)[] } {
+    const captured: (readonly CalibrationEntry[] | undefined)[] = [];
+    return {
+      captured,
+      evaluator: {
+        name,
+        async castVote(_action, _severity, exemplars): Promise<Vote> {
+          captured.push(exemplars);
+          return { evaluator: name, vote: 'allow', rationale: 'ok' };
+        },
+      },
+    };
+  }
+
+  test('omitting the 4th param forwards undefined to every evaluator (existing 3-arg callers stay compatible)', async () => {
+    const melchior = capturingEvaluator('melchior');
+    const balthasar = capturingEvaluator('balthasar');
+    const casper = capturingEvaluator('casper');
+
+    await collectVotes([melchior.evaluator, balthasar.evaluator, casper.evaluator], action(), 'low');
+
+    assert.equal(melchior.captured[0], undefined);
+    assert.equal(balthasar.captured[0], undefined);
+    assert.equal(casper.captured[0], undefined);
+  });
+
+  test('a supplied exemplar set is forwarded unchanged to all three evaluators', async () => {
+    const exemplars: CalibrationEntry[] = [
+      {
+        tag: 'force-push',
+        severity: 'critical',
+        exemplar: 'always deny',
+        contentHash: 'a'.repeat(64),
+        createdAt: '2026-08-12T00:00:00.000Z',
+      },
+    ];
+    const melchior = capturingEvaluator('melchior');
+    const balthasar = capturingEvaluator('balthasar');
+    const casper = capturingEvaluator('casper');
+
+    await collectVotes([melchior.evaluator, balthasar.evaluator, casper.evaluator], action(), 'low', exemplars);
+
+    assert.deepEqual(melchior.captured[0], exemplars);
+    assert.deepEqual(balthasar.captured[0], exemplars);
+    assert.deepEqual(casper.captured[0], exemplars);
   });
 });

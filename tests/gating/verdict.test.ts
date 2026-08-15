@@ -3,6 +3,8 @@ import assert from 'node:assert/strict';
 import { assembleVerdict, VerdictSchema } from '../../src/gating/verdict.ts';
 import type { Vote, VoteDecision } from '../../src/gating/consensus.ts';
 import type { CodingAgentAction } from '../../src/gating/proposed-action.ts';
+import type { ExemplarSelection } from '../../src/calibration/exemplar-injection.ts';
+import type { CalibrationEntry } from '../../src/calibration/corpus-schema.ts';
 
 function action(overrides: Partial<CodingAgentAction> = {}): CodingAgentAction {
   return {
@@ -61,7 +63,7 @@ describe('assembleVerdict — combines severity classification + consensus resol
     assert.equal(verdict.decision, 'deny');
   });
 
-  test('carries calibration placeholder fields through unchanged (calibration not implemented until a later PR)', () => {
+  test('the existing 3-arg call (no selection) still defaults calibrationCorpusHash/exemplarIds to the empty placeholders', () => {
     const a = action();
     const v = votes(['allow', 'allow', 'allow']);
     const verdict = assembleVerdict(a, 'medium', v);
@@ -90,5 +92,54 @@ describe('assembleVerdict — combines severity classification + consensus resol
     const verdict = assembleVerdict(infraAction, 'low', v);
     assert.equal(verdict.action, 'build-42');
     assert.equal(verdict.decision, 'allow');
+  });
+});
+
+function calibrationEntry(overrides: Partial<CalibrationEntry> = {}): CalibrationEntry {
+  return {
+    tag: 'force-push-protected-branch',
+    severity: 'critical',
+    exemplar: 'Force-pushing to main destroys shared history for everyone else on the team; always deny.',
+    contentHash: 'a'.repeat(64),
+    createdAt: '2026-08-12T00:00:00.000Z',
+    ...overrides,
+  };
+}
+
+describe('assembleVerdict — 4th param populates real calibration audit fields (additive, default-backed)', () => {
+  test('a populated corpus produces a real calibrationCorpusHash and exemplarIds equal to the retrieved exemplars\' contentHash[]', () => {
+    const a = action();
+    const v = votes(['allow', 'allow', 'allow']);
+    const selection: ExemplarSelection = {
+      exemplars: [calibrationEntry({ contentHash: 'a'.repeat(64) }), calibrationEntry({ contentHash: 'b'.repeat(64) })],
+      corpusHash: 'c'.repeat(64),
+    };
+
+    const verdict = assembleVerdict(a, 'high', v, selection);
+
+    assert.equal(verdict.calibrationCorpusHash, 'c'.repeat(64));
+    assert.deepEqual(verdict.exemplarIds, ['a'.repeat(64), 'b'.repeat(64)]);
+  });
+
+  test('an empty selection still produces a real (non-"") empty-snapshot hash when the caller supplies one', () => {
+    const a = action();
+    const v = votes(['allow', 'allow', 'allow']);
+    const selection: ExemplarSelection = { exemplars: [], corpusHash: 'd'.repeat(64) };
+
+    const verdict = assembleVerdict(a, 'low', v, selection);
+
+    assert.equal(verdict.calibrationCorpusHash, 'd'.repeat(64));
+    assert.deepEqual(verdict.exemplarIds, []);
+  });
+
+  test('a genuinely empty corpus (selection with corpusHash "") produces "" and an empty exemplarIds array, not a placeholder bug', () => {
+    const a = action();
+    const v = votes(['allow', 'allow', 'allow']);
+    const selection: ExemplarSelection = { exemplars: [], corpusHash: '' };
+
+    const verdict = assembleVerdict(a, 'low', v, selection);
+
+    assert.equal(verdict.calibrationCorpusHash, '');
+    assert.deepEqual(verdict.exemplarIds, []);
   });
 });

@@ -1,9 +1,11 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { z } from 'zod';
 import { VoteDecisionSchema } from './consensus.ts';
+import { formatExemplarsForPrompt } from '../calibration/exemplar-prompt.ts';
 import type { Evaluator as EvaluatorName, Vote } from './consensus.ts';
 import type { ProposedAction, SeverityTier } from './proposed-action.ts';
 import type { EvaluatorPort } from './evaluator-port.ts';
+import type { CalibrationEntry } from '../calibration/corpus-schema.ts';
 
 /**
  * Sync-tier concrete `EvaluatorPort`: a single forced-tool-use call to a
@@ -79,12 +81,10 @@ export interface AnthropicMessagesClient {
  * evaluator role from spec Requirement: Evaluator Vote Contract (fact/
  * consistency, blast radius + policy, actor risk/anomaly) — not a
  * fabricated "persona". Real per-operator calibration (top-K exemplars
- * retrieved from the calibration corpus, see `src/calibration/`) is a
- * documented forward-looking gap: this PR wires the static facet text into
- * the system prompt only; live exemplar injection is deferred until the
- * corpus has real content and the full pipeline is assembled (Phase 9+),
- * matching the same passthrough-placeholder pattern `assembleVerdict`
- * already established for `calibrationCorpusHash`/`exemplarIds` (PR2).
+ * retrieved from the calibration corpus, see `src/calibration/`) is now
+ * live: `runHook` resolves one exemplar selection per action and threads it
+ * into `castVote`'s `exemplars` param, formatted into the prompt alongside
+ * this static facet text (see `magi-calibration-live-wiring`).
  */
 export interface CalibrationFacet {
   /** Short label for this facet, e.g. "fact/consistency". */
@@ -123,7 +123,7 @@ export class AnthropicEvaluator implements EvaluatorPort {
     this.client = options.client ?? new Anthropic({ apiKey: options.apiKey }).messages;
   }
 
-  async castVote(action: ProposedAction, severity: SeverityTier): Promise<Vote> {
+  async castVote(action: ProposedAction, severity: SeverityTier, exemplars?: readonly CalibrationEntry[]): Promise<Vote> {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), this.timeoutMs);
     try {
@@ -132,7 +132,7 @@ export class AnthropicEvaluator implements EvaluatorPort {
           model: this.model,
           max_tokens: this.maxTokens,
           system: this.buildSystemPrompt(),
-          messages: [{ role: 'user', content: this.buildUserPrompt(action, severity) }],
+          messages: [{ role: 'user', content: this.buildUserPrompt(action, severity, exemplars) }],
           tools: [CAST_VOTE_TOOL],
           tool_choice: { type: 'tool', name: CAST_VOTE_TOOL_NAME },
         },
@@ -179,7 +179,7 @@ export class AnthropicEvaluator implements EvaluatorPort {
     ].join('\n');
   }
 
-  private buildUserPrompt(action: ProposedAction, severity: SeverityTier): string {
+  private buildUserPrompt(action: ProposedAction, severity: SeverityTier, exemplars?: readonly CalibrationEntry[]): string {
     const lines = [
       `Actor: ${action.actor}`,
       `Action type: ${action.actionType}`,
@@ -192,6 +192,12 @@ export class AnthropicEvaluator implements EvaluatorPort {
     } else {
       lines.push(`Pipeline id: ${action.pipelineId}`);
     }
+    // Byte-identical-prompt guarantee: `formatExemplarsForPrompt` returns
+    // `''` for an empty/absent exemplar set, so this is a true no-op when
+    // `.magi/calibration/` is empty — nothing is pushed, and the prompt
+    // stays byte-identical to the pre-change baseline.
+    const exemplarBlock = formatExemplarsForPrompt(exemplars ?? []);
+    if (exemplarBlock) lines.push(exemplarBlock);
     lines.push('Cast your vote (allow / deny / abstain) with a rationale via the cast_vote tool.');
     return lines.join('\n');
   }

@@ -431,7 +431,7 @@ El corpus de calibración (`.magi/calibration/`) es local-only, ya está en `.gi
 
 Dos valores numéricos en `magi.config.json` están marcados explícitamente como placeholders, confirmados como aceptables para arrancar pero sin validación real todavía:
 
-- `tiers.sync.k = 5` — top-K de ejemplares que trae el selector (se usa una vez que la inyección de calibración esté cableada).
+- `tiers.sync.k = 5` — top-K de ejemplares que trae el selector, ya cableado: `runHook` resuelve e inyecta los exemplars reales del corpus en el prompt de cada evaluador (ver `sdd/magi-calibration-live-wiring`).
 - `tiers.async.k = 12` — actualmente sin uso, porque el modo async está fuera de scope.
 - `tiers.divergenceFloorPercent = 40` — el piso mínimo de fracción de fixtures divergentes en los que las tres facetas deben genuinamente discrepar para que `magi calibrate verify` pase.
 

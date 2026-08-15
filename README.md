@@ -223,9 +223,11 @@ Two numeric thresholds in `magi.config.json` and the calibration harness
 are explicit **placeholders**, confirmed as acceptable to proceed with
 before any real calibration corpus exists (`sdd/magi/design-decisions`):
 
-- **Selector top-K**: `tiers.sync.k = 5` (used, once calibration
-  injection is wired), `tiers.async.k = 12` (currently unused — async
-  mode itself is out of scope, see above).
+- **Selector top-K**: `tiers.sync.k = 5` — live now: `runHook` resolves
+  and injects real corpus exemplars into every evaluator's prompt (see
+  `sdd/magi-calibration-live-wiring`), so this value is load-bearing as
+  soon as `.magi/calibration/` has entries. `tiers.async.k = 12` remains
+  unused — async mode itself is out of scope, see above.
 - **Divergence harness floor**: `tiers.divergenceFloorPercent = 40` — the
   minimum fraction of designed-divergent fixtures the three evaluator
   facets must genuinely disagree on for `magi calibrate verify` to pass.

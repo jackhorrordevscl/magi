@@ -1,9 +1,11 @@
 import { z } from 'zod';
 import { VoteDecisionSchema } from './consensus.ts';
+import { formatExemplarsForPrompt } from '../calibration/exemplar-prompt.ts';
 import type { Evaluator as EvaluatorName, Vote } from './consensus.ts';
 import type { ProposedAction, SeverityTier } from './proposed-action.ts';
 import type { EvaluatorPort } from './evaluator-port.ts';
 import type { CalibrationFacet } from './anthropic-evaluator.ts';
+import type { CalibrationEntry } from '../calibration/corpus-schema.ts';
 
 /**
  * Sync-tier concrete `EvaluatorPort` backed by Groq's OpenAI-compatible
@@ -158,7 +160,7 @@ export class GroqEvaluator implements EvaluatorPort {
       new FetchGroqChatClient(options.apiKey ?? process.env.GROQ_API_KEY, options.baseUrl ?? DEFAULT_BASE_URL);
   }
 
-  async castVote(action: ProposedAction, severity: SeverityTier): Promise<Vote> {
+  async castVote(action: ProposedAction, severity: SeverityTier, exemplars?: readonly CalibrationEntry[]): Promise<Vote> {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), this.timeoutMs);
     try {
@@ -168,7 +170,7 @@ export class GroqEvaluator implements EvaluatorPort {
           max_tokens: this.maxTokens,
           messages: [
             { role: 'system', content: this.buildSystemPrompt() },
-            { role: 'user', content: this.buildUserPrompt(action, severity) },
+            { role: 'user', content: this.buildUserPrompt(action, severity, exemplars) },
           ],
           tools: [CAST_VOTE_TOOL],
           tool_choice: { type: 'function', function: { name: CAST_VOTE_TOOL_NAME } },
@@ -224,7 +226,7 @@ export class GroqEvaluator implements EvaluatorPort {
     ].join('\n');
   }
 
-  private buildUserPrompt(action: ProposedAction, severity: SeverityTier): string {
+  private buildUserPrompt(action: ProposedAction, severity: SeverityTier, exemplars?: readonly CalibrationEntry[]): string {
     const lines = [
       `Actor: ${action.actor}`,
       `Action type: ${action.actionType}`,
@@ -237,6 +239,11 @@ export class GroqEvaluator implements EvaluatorPort {
     } else {
       lines.push(`Pipeline id: ${action.pipelineId}`);
     }
+    // Byte-identical-prompt guarantee: see anthropic-evaluator.ts's
+    // identical comment — `formatExemplarsForPrompt` is a true no-op on an
+    // empty/absent exemplar set.
+    const exemplarBlock = formatExemplarsForPrompt(exemplars ?? []);
+    if (exemplarBlock) lines.push(exemplarBlock);
     lines.push('Cast your vote (allow / deny / abstain) with a rationale via the cast_vote tool.');
     return lines.join('\n');
   }
