@@ -55,6 +55,7 @@ function verdict(overrides: Partial<Verdict> = {}): Verdict {
     decision: 'allow',
     calibrationCorpusHash: '',
     exemplarIds: [],
+    corpusDegraded: false,
     ...overrides,
   };
 }

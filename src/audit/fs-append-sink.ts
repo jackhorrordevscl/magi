@@ -52,6 +52,7 @@ export class FsAppendAuditSink implements AuditSink {
         decision: verdict.decision,
         calibrationCorpusHash: verdict.calibrationCorpusHash,
         exemplarIds: verdict.exemplarIds,
+        corpusDegraded: verdict.corpusDegraded,
       }),
       AuditRecordSchema,
       now,

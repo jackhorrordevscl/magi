@@ -113,6 +113,7 @@ describe('assembleVerdict — 4th param populates real calibration audit fields 
     const selection: ExemplarSelection = {
       exemplars: [calibrationEntry({ contentHash: 'a'.repeat(64) }), calibrationEntry({ contentHash: 'b'.repeat(64) })],
       corpusHash: 'c'.repeat(64),
+      degraded: false,
     };
 
     const verdict = assembleVerdict(a, 'high', v, selection);
@@ -124,7 +125,7 @@ describe('assembleVerdict — 4th param populates real calibration audit fields 
   test('an empty selection still produces a real (non-"") empty-snapshot hash when the caller supplies one', () => {
     const a = action();
     const v = votes(['allow', 'allow', 'allow']);
-    const selection: ExemplarSelection = { exemplars: [], corpusHash: 'd'.repeat(64) };
+    const selection: ExemplarSelection = { exemplars: [], corpusHash: 'd'.repeat(64), degraded: false };
 
     const verdict = assembleVerdict(a, 'low', v, selection);
 
@@ -135,11 +136,28 @@ describe('assembleVerdict — 4th param populates real calibration audit fields 
   test('a genuinely empty corpus (selection with corpusHash "") produces "" and an empty exemplarIds array, not a placeholder bug', () => {
     const a = action();
     const v = votes(['allow', 'allow', 'allow']);
-    const selection: ExemplarSelection = { exemplars: [], corpusHash: '' };
+    const selection: ExemplarSelection = { exemplars: [], corpusHash: '', degraded: false };
 
     const verdict = assembleVerdict(a, 'low', v, selection);
 
     assert.equal(verdict.calibrationCorpusHash, '');
     assert.deepEqual(verdict.exemplarIds, []);
+  });
+
+  test('a degraded selection (corrupted/unreadable corpus) carries corpusDegraded:true into the verdict, distinct from a genuinely empty corpus', () => {
+    const a = action();
+    const v = votes(['allow', 'allow', 'allow']);
+    const selection: ExemplarSelection = { exemplars: [], corpusHash: '', degraded: true };
+
+    const verdict = assembleVerdict(a, 'low', v, selection);
+
+    assert.equal(verdict.corpusDegraded, true);
+  });
+
+  test('the existing 3-arg call (no selection) defaults corpusDegraded to false — "no attempt made" is not "corpus is corrupted"', () => {
+    const a = action();
+    const v = votes(['allow', 'allow', 'allow']);
+    const verdict = assembleVerdict(a, 'medium', v);
+    assert.equal(verdict.corpusDegraded, false);
   });
 });

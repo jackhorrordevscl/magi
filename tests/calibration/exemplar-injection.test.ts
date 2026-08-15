@@ -117,7 +117,7 @@ describe('resolveExemplarSelection — total, never throws (D4 containment)', ()
 });
 
 describe('resolveExemplarSelection — distinguishing empty corpus from failed read', () => {
-  test('an empty-but-valid corpus yields EMPTY_SELECTION with NO warn log, unlike a corrupt corpus', async () => {
+  test('an empty-but-valid corpus yields exemplars:[] with degraded:false and NO warn log, unlike a corrupt corpus', async () => {
     const dir = tmpDir();
     const corpus = new CalibrationCorpus(dir); // directory does not exist yet -> list() returns []
 
@@ -126,11 +126,15 @@ describe('resolveExemplarSelection — distinguishing empty corpus from failed r
       result = resolveExemplarSelection(codingAction(), 'low', { corpus });
     });
 
-    assert.deepEqual(result, EMPTY_SELECTION);
+    // NOT deepEqual to EMPTY_SELECTION any more: EMPTY_SELECTION.degraded is
+    // true (it's the directory-unreadable fallback), while a genuinely
+    // empty-but-valid corpus must report degraded:false — that's the whole
+    // point of the distinction (see the next describe block).
+    assert.deepEqual(result, { exemplars: [], corpusHash: '', degraded: false });
     assert.equal(stderr, '', 'an empty-but-valid corpus must never emit a read-failure warning');
   });
 
-  test('same two runs side by side: both empty exemplar sets, only the corrupt run warns', async () => {
+  test('same two runs side by side: both empty exemplar sets, only the corrupt run warns and only the corrupt run reports degraded:true', async () => {
     const emptyDir = tmpDir();
     const emptyCorpus = new CalibrationCorpus(path.join(emptyDir, 'does-not-exist'));
 
@@ -153,6 +157,13 @@ describe('resolveExemplarSelection — distinguishing empty corpus from failed r
     assert.deepEqual(corruptResult?.exemplars, []);
     assert.equal(emptyStderr, '');
     assert.match(corruptStderr, /calibration entry unreadable, skipping/i);
+
+    // The two selections are otherwise identical ([]/''), so `degraded` is
+    // the ONLY thing that distinguishes them — and now it's a field on the
+    // selection itself (and, via assembleVerdict, on the audit record),
+    // not just a transient stderr line.
+    assert.equal(emptyResult?.degraded, false);
+    assert.equal(corruptResult?.degraded, true);
   });
 });
 

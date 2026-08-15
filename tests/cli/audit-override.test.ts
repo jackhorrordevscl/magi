@@ -25,6 +25,7 @@ function verdict(overrides: Partial<Verdict> = {}): Verdict {
     decision: 'deny',
     calibrationCorpusHash: '',
     exemplarIds: [],
+    corpusDegraded: false,
     ...overrides,
   };
 }
