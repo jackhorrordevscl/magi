@@ -140,6 +140,15 @@ export interface RunHookOptions {
    * calls `runHook`.
    */
   corpus?: CalibrationCorpus;
+  /**
+   * Forwarded to `resolveExemplarSelection` -> `loadSyncExemplarK`, which
+   * otherwise defaults to `tiers.sync.k` read from bare `magi.config.json`
+   * resolved against `process.cwd()` — the only seam that let `corpus` above
+   * be overridden without also letting the `tiers.sync.k` source it reads
+   * from be overridden, despite `k`'s own doc comment claiming it "IS
+   * load-bearing" (see issue #3).
+   */
+  configPath?: string;
 }
 
 export interface HookOutcome {
@@ -196,7 +205,10 @@ export async function runHook(action: ProposedAction, options: RunHookOptions = 
   const now = options.now ?? new Date();
 
   const severity = classify(action);
-  const selection = resolveExemplarSelection(action, severity, options.corpus ? { corpus: options.corpus } : {});
+  const selection = resolveExemplarSelection(action, severity, {
+    ...(options.corpus ? { corpus: options.corpus } : {}),
+    ...(options.configPath ? { configPath: options.configPath } : {}),
+  });
   const votes = await collectVotes(evaluators, action, severity, selection.exemplars);
   const verdict = assembleVerdict(action, severity, votes, selection);
 
