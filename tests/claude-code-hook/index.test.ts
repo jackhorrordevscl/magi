@@ -475,6 +475,91 @@ describe('runHook — shared exemplar selection (spec Requirement: Single Shared
   });
 });
 
+/** Captures everything written to `process.stderr` for the duration of `fn` (mirrors `tests/calibration/exemplar-injection.test.ts`'s helper). */
+async function captureStderr(fn: () => void | Promise<void>): Promise<string> {
+  const original = process.stderr.write.bind(process.stderr);
+  let buffer = '';
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  (process.stderr as any).write = (chunk: unknown) => {
+    buffer += typeof chunk === 'string' ? chunk : String(chunk);
+    return true;
+  };
+  try {
+    await fn();
+  } finally {
+    process.stderr.write = original;
+  }
+  return buffer;
+}
+
+describe('runHook — corrupt corpus degrades to zero exemplars end-to-end, never forces a deny (D4 integration, spec scenario: corrupt corpus degrades to zero exemplars)', () => {
+  test('a corrupt corpus file flows through runHook to EMPTY_SELECTION-shaped verdict fields + warn log, while evaluators still vote normally (allow, not forced deny)', async () => {
+    const dir = tmpAuditDir();
+    const auditSink = new FsAppendAuditSink(dir);
+    const now = new Date('2026-08-12T10:00:00.000Z');
+
+    // A corrupt corpus: a directory containing one malformed JSON entry file,
+    // which makes `CalibrationCorpus.list()` throw (`JSON.parse` failure)
+    // when `resolveExemplarSelection` calls it — this is architecturally
+    // distinct from an evaluator's own fail-closed-to-deny transport-error
+    // catch (see `src/calibration/exemplar-injection.ts`'s doc comment).
+    const corpusDir = fs.mkdtempSync(path.join(os.tmpdir(), 'magi-hook-corrupt-corpus-'));
+    fs.writeFileSync(path.join(corpusDir, `${'c'.repeat(64)}.json`), '{ this is not valid json', 'utf8');
+    const corpus = new CountingCalibrationCorpus(corpusDir);
+
+    // All 3 evaluators vote allow: if the corpus-read failure forced a deny
+    // (fail-closed) rather than merely degrading to zero exemplars, the
+    // resulting decision would be deny regardless of these votes. Asserting
+    // an allow decision here proves the evaluators cast their OWN, genuine
+    // votes from actual model-call logic (via injected test doubles), never
+    // a vote manufactured by the corpus-read failure itself.
+    const melchior = exemplarCapturingEvaluator('melchior');
+    const balthasar = exemplarCapturingEvaluator('balthasar');
+    const casper = exemplarCapturingEvaluator('casper');
+
+    const action = normalizeToProposedAction(
+      { tool_name: 'Bash', tool_input: { command: 'git push --force origin main' } },
+      'shadow',
+    );
+
+    let outcome: Awaited<ReturnType<typeof runHook>> | undefined;
+    const stderr = await captureStderr(async () => {
+      outcome = await runHook(action, {
+        auditSink,
+        now,
+        corpus,
+        evaluators: [melchior.evaluator, balthasar.evaluator, casper.evaluator],
+      });
+    });
+
+    assert.equal(corpus.calls, 1, 'the corrupt corpus is still read exactly once (the failure happens inside that one call)');
+
+    // (a) resolveExemplarSelection returned an empty selection: every
+    // evaluator received exemplars:[] (the same shared selection, per spec
+    // Requirement: Single Shared Exemplar Selection Per Action).
+    assert.deepEqual(melchior.captured[0], []);
+    assert.deepEqual(balthasar.captured[0], []);
+    assert.deepEqual(casper.captured[0], []);
+
+    // (b) a warn-level log occurred (the corrupt-read path, NOT the silent
+    // empty-but-valid-corpus path — see the exemplar-injection.test.ts
+    // "distinguishing empty corpus from failed read" tests).
+    assert.match(stderr, /calibration corpus unavailable/i);
+
+    // The resulting verdict's calibrationCorpusHash/exemplarIds reflect the
+    // same EMPTY_SELECTION-shaped degraded selection as a genuinely empty
+    // (but valid) corpus would produce.
+    assert.deepEqual(outcome?.verdict?.exemplarIds, []);
+    assert.equal(outcome?.verdict?.calibrationCorpusHash, '');
+
+    // (c) the evaluators still produced a normal, non-forced-deny vote: a
+    // real allow decision from the evaluators' own vote logic, not a deny
+    // manufactured by the corpus-read failure.
+    assert.equal(outcome?.verdict?.decision, 'allow', 'the corpus-read failure must never force a deny vote');
+    assert.equal(outcome?.allow, true);
+  });
+});
+
 interface HookSpecificOutputJson {
   hookSpecificOutput?: {
     hookEventName?: string;
