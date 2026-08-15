@@ -29,6 +29,9 @@ const DEFAULT_MODEL = 'claude-3-5-haiku-latest';
 const DEFAULT_TIMEOUT_MS = 2500;
 const DEFAULT_MAX_TOKENS = 512;
 
+/** Anthropic's own built-in defaults, exposed for the TUI's display-only effective-value rule (`src/cli/tui/effective-settings.ts`). No behavior change. */
+export const ANTHROPIC_BUILTIN_DEFAULTS = { model: DEFAULT_MODEL, timeoutMs: DEFAULT_TIMEOUT_MS, maxTokens: DEFAULT_MAX_TOKENS };
+
 const CAST_VOTE_TOOL_NAME = 'cast_vote';
 
 /**

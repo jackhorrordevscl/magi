@@ -21,6 +21,9 @@ const DEFAULT_TIMEOUT_MS = 2500;
 const DEFAULT_MAX_TOKENS = 512;
 const DEFAULT_BASE_URL = 'https://api.groq.com/openai/v1/chat/completions';
 
+/** Groq's own built-in defaults, exposed for the TUI's display-only effective-value rule (`src/cli/tui/effective-settings.ts`). No behavior change. */
+export const GROQ_BUILTIN_DEFAULTS = { model: DEFAULT_MODEL, timeoutMs: DEFAULT_TIMEOUT_MS, maxTokens: DEFAULT_MAX_TOKENS };
+
 const CAST_VOTE_TOOL_NAME = 'cast_vote';
 
 /**
