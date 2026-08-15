@@ -19,10 +19,21 @@ export interface ExemplarSelection {
   readonly exemplars: readonly CalibrationEntry[];
   /** Digest-of-digests over the FULL corpus snapshot (not just the retrieved exemplars). `''` when empty or degraded. */
   readonly corpusHash: string;
+  /**
+   * True when the corpus read was degraded: either the directory itself was
+   * unreadable, or one or more entry files were skipped as corrupt. False
+   * for a genuinely empty-but-valid corpus. Without this, an empty corpus
+   * and a corpus quietly losing real entries to corruption are otherwise
+   * indistinguishable in the resulting `exemplars`/`corpusHash` — both are
+   * `[]`/`''`. Carried through to `Verdict.corpusDegraded`
+   * (`src/gating/verdict.ts`) so the distinction lands in the durable audit
+   * record, not just a transient stderr warning.
+   */
+  readonly degraded: boolean;
 }
 
-/** The selection every non-trivial action degrades to when the corpus is empty, unreadable, or corrupt. */
-export const EMPTY_SELECTION: ExemplarSelection = { exemplars: [], corpusHash: '' };
+/** The selection resolution degrades to when the corpus directory itself is unreadable (a directory-level failure, not a per-file one — see `listWithDiagnostics()`). */
+export const EMPTY_SELECTION: ExemplarSelection = { exemplars: [], corpusHash: '', degraded: true };
 
 /**
  * Derives the lexical query tag `selectExemplars` matches against, from
@@ -66,10 +77,13 @@ function describeError(error: unknown): string {
  * Failure). The try/catch here is CONTAINED and architecturally disjoint
  * from any evaluator's fail-closed catch: this one lives upstream of
  * `collectVotes` and produces empty CONTEXT (no gating signal, no `Vote`
- * constructed), never a `deny`. On failure it warns at `stderr` and returns
- * `EMPTY_SELECTION` — the same value a genuinely empty (but valid) corpus
- * produces, EXCEPT only the failure path emits the warn-level log (spec
- * scenario "Distinguishing empty corpus from failed read").
+ * constructed), never a `deny`. Both a directory-level read failure and a
+ * per-file corrupt-entry skip warn at `stderr` (the latter from inside
+ * `CalibrationCorpus.listWithDiagnostics()` itself); either way `degraded`
+ * is `true` on the returned selection, so the distinction between "no
+ * calibration data yet" and "corpus is silently losing entries" survives
+ * past the stderr line into the audit record (spec scenario
+ * "Distinguishing empty corpus from failed read").
  */
 export function resolveExemplarSelection(
   action: ProposedAction,
@@ -79,8 +93,9 @@ export function resolveExemplarSelection(
   const corpus = options.corpus ?? new CalibrationCorpus();
 
   let entries: CalibrationEntry[];
+  let skippedCount: number;
   try {
-    entries = corpus.list();
+    ({ entries, skippedCount } = corpus.listWithDiagnostics());
   } catch (error) {
     warn(`magi: calibration corpus unavailable, voting without exemplars: ${describeError(error)}`);
     return EMPTY_SELECTION;
@@ -90,5 +105,5 @@ export function resolveExemplarSelection(
   const k = loadSyncExemplarK(options.configPath);
   const exemplars = selectExemplars(entries, { tag: deriveExemplarTag(action), severity }, k);
 
-  return { exemplars, corpusHash };
+  return { exemplars, corpusHash, degraded: skippedCount > 0 };
 }

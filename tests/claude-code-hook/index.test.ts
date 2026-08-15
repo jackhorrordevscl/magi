@@ -292,6 +292,7 @@ describe('buildBlockReason — full evaluator rationale + audit hash', () => {
       decision: 'deny' as const,
       calibrationCorpusHash: '',
       exemplarIds: [],
+      corpusDegraded: false,
     };
 
     const reason = buildBlockReason(verdict.action, 'abc123hash', verdict);
@@ -355,9 +356,9 @@ describe('runHook — audit durability (record present on disk by the time runHo
 
 class CountingCalibrationCorpus extends CalibrationCorpus {
   calls = 0;
-  override list(): CalibrationEntry[] {
+  override listWithDiagnostics(): { entries: CalibrationEntry[]; skippedCount: number } {
     this.calls += 1;
-    return super.list();
+    return super.listWithDiagnostics();
   }
 }
 
@@ -472,6 +473,7 @@ describe('runHook — shared exemplar selection (spec Requirement: Single Shared
     assert.equal(corpus.calls, 1);
     assert.deepEqual(outcome.verdict?.exemplarIds, []);
     assert.equal(outcome.verdict?.calibrationCorpusHash, '', 'an empty corpus snapshot hash is genuinely "" per computeCorpusSnapshotHash');
+    assert.equal(outcome.verdict?.corpusDegraded, false, 'a genuinely empty (but valid) corpus must not be flagged as degraded');
   });
 });
 
@@ -552,6 +554,11 @@ describe('runHook — corrupt corpus degrades to zero exemplars end-to-end, neve
     // (but valid) corpus would produce.
     assert.deepEqual(outcome?.verdict?.exemplarIds, []);
     assert.equal(outcome?.verdict?.calibrationCorpusHash, '');
+    assert.equal(
+      outcome?.verdict?.corpusDegraded,
+      true,
+      'a corrupt-entry-skip must be flagged degraded, unlike a genuinely empty corpus (D3.1: audit trail must distinguish the two)',
+    );
 
     // (c) the evaluators still produced a normal, non-forced-deny vote: a
     // real allow decision from the evaluators' own vote logic, not a deny

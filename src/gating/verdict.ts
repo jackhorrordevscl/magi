@@ -53,9 +53,10 @@ function describeAction(action: ProposedAction): string {
 interface ExemplarSelectionLike {
   readonly exemplars: readonly { readonly contentHash: string }[];
   readonly corpusHash: string;
+  readonly degraded: boolean;
 }
 
-const EMPTY_EXEMPLAR_SELECTION: ExemplarSelectionLike = { exemplars: [], corpusHash: '' };
+const EMPTY_EXEMPLAR_SELECTION: ExemplarSelectionLike = { exemplars: [], corpusHash: '', degraded: false };
 
 /**
  * Combines the orchestrator-owned severity classification
@@ -85,5 +86,6 @@ export function assembleVerdict(
     decision: resolveConsensus(votes, severity),
     calibrationCorpusHash: selection.corpusHash,
     exemplarIds: selection.exemplars.map((exemplar) => exemplar.contentHash),
+    corpusDegraded: selection.degraded,
   };
 }

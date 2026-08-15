@@ -109,6 +109,45 @@ describe('CalibrationCorpus — add/list', () => {
     assert.match(stderr, /calibration entry unreadable, skipping/i);
   });
 
+  test('listWithDiagnostics() reports skippedCount:0 for a fully valid corpus', () => {
+    const dir = tmpDir();
+    const corpus = new CalibrationCorpus(dir);
+    const now = new Date('2026-08-12T10:00:00.000Z');
+
+    corpus.add(entryInput({ tag: 'a' }), now);
+    corpus.add(entryInput({ tag: 'b' }), now);
+
+    const { entries, skippedCount } = corpus.listWithDiagnostics();
+    assert.equal(entries.length, 2);
+    assert.equal(skippedCount, 0);
+  });
+
+  test('listWithDiagnostics() reports skippedCount:0 for a directory that does not exist yet', () => {
+    const dir = path.join(tmpDir(), 'does-not-exist');
+    const corpus = new CalibrationCorpus(dir);
+    const { entries, skippedCount } = corpus.listWithDiagnostics();
+    assert.deepEqual(entries, []);
+    assert.equal(skippedCount, 0);
+  });
+
+  test('listWithDiagnostics() counts each corrupt entry file it skips, distinguishing "empty" from "corrupted-down-to-empty"', async () => {
+    const dir = tmpDir();
+    const corpus = new CalibrationCorpus(dir);
+    const now = new Date('2026-08-12T10:00:00.000Z');
+
+    const good = corpus.add(entryInput({ tag: 'a' }), now);
+    fs.writeFileSync(path.join(dir, `${'e'.repeat(64)}.json`), '{ not valid json', 'utf8');
+    fs.writeFileSync(path.join(dir, `${'f'.repeat(64)}.json`), 'also not valid json', 'utf8');
+
+    let result: { entries: CalibrationEntry[]; skippedCount: number } | undefined;
+    await captureStderr(() => {
+      result = corpus.listWithDiagnostics();
+    });
+
+    assert.deepEqual(result?.entries.map((e) => e.contentHash), [good.contentHash]);
+    assert.equal(result?.skippedCount, 2, 'both corrupt files must be counted, not just detected as a boolean');
+  });
+
   test('re-adding byte-identical content is idempotent (content-addressed, not duplicated)', () => {
     const dir = tmpDir();
     const corpus = new CalibrationCorpus(dir);

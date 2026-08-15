@@ -30,6 +30,8 @@ export const AuditRecordSchema = z.object({
   decision: AuditDecisionSchema,
   calibrationCorpusHash: z.string(),
   exemplarIds: z.array(z.string()),
+  /** True when calibration exemplar retrieval was degraded (unreadable corpus dir or corrupt entries skipped), false for a genuinely empty-but-valid corpus. See `ExemplarSelection.degraded` (`src/calibration/exemplar-injection.ts`). */
+  corpusDegraded: z.boolean(),
 });
 export type AuditRecord = z.infer<typeof AuditRecordSchema>;
 
