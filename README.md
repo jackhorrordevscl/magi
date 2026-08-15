@@ -82,6 +82,18 @@ facet from `melchior.ts`/`balthasar.ts`/`casper.ts` instead of using
 `MainDeps.evaluators` — see MANUAL.md, section 4, for worked examples of
 both swaps.
 
+Beyond code-level DI, `magi.config.json` also accepts an optional
+top-level `evaluators` key — a sibling of `tiers`/`paths` — letting an
+operator set each named evaluator's `backend`/`model`/`timeoutMs`/
+`maxTokens` without touching code or rebuilding (`src/gating/
+evaluator-config.ts`, read by `melchior.ts`/`balthasar.ts`/`casper.ts`).
+`apiKey` is deliberately never a config field — API keys stay
+environment-variable-only. Precedence: code-level DI (above) always wins
+over this config; this config always wins over the hardcoded defaults.
+`magi tui` (see [CLI commands](#cli-commands) below) edits this section
+interactively. See MANUAL.md, section 4, for the full field reference and
+validation rules.
+
 ## Shadow mode: always allows, always records
 
 **`MAGI_MODE=shadow` never blocks a tool call, regardless of the computed
@@ -97,6 +109,15 @@ hash-chained audit log (`.magi/audit/`) **before** the hook returns its
 never blocks: it measures what an enforcing gate *would have* decided,
 against real day-to-day agent activity, without any risk of an
 over-eager gate wedging a real workflow.
+
+Each verdict record also carries `calibrationCorpusHash`/`exemplarIds`
+(the calibration corpus snapshot and retrieved-exemplar hashes behind
+that vote) and `corpusDegraded` (`true` when that corpus read was
+degraded — unreadable directory or a skipped corrupt entry — `false` for
+a genuinely empty or healthy corpus). All three are on every chain
+record today but are not yet surfaced by `magi audit stats` or `magi
+tui`'s Audit screen — currently readable only from the raw JSONL under
+`.magi/audit/`.
 
 This is a deliberate two-step rollout (see `sdd/magi/design`'s P1 → P4
 plan): observe and measure false-positive rate in shadow mode first,
