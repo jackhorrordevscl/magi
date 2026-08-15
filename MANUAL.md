@@ -230,7 +230,7 @@ Antes, cualquier ejecutable que no fuera `git` clasificaba siempre `low`, sin im
 | `docker-rmi-force` | `docker rmi -f imagen` | medium |
 | `docker-volume-rm` | `docker volume rm mi-volumen` | medium |
 | `psql-destructive-sql` | `psql -c "DROP TABLE users"` o `DELETE FROM users` sin `WHERE` | high |
-| `mysql-destructive-sql` | `mysql -e "TRUNCATE tabla"` | high |
+| `mysql-destructive-sql` | `mysql -e "TRUNCATE tabla"` (también matchea `mariadb`, mismo ejecutable-regla) | high |
 
 Un par de matices reales del código, para que no te sorprendan:
 
@@ -357,6 +357,8 @@ Overrides: 3 (18.8% of denies overridden — documentary only, does not reclassi
 ```
 
 Importante: el "deny-rate proxy" NO es una tasa de falsos positivos real — MAGI no tiene ground truth sobre la intención real del operador. Solo te dice qué tan seguido *habría* bloqueado shadow mode. Confirmar cuáles de esos denies son falsos positivos genuinos requiere que un humano revise los registros denegados uno por uno.
+
+Cada registro de veredicto en el audit log también carga `calibrationCorpusHash`/`exemplarIds` (el snapshot del corpus y los ejemplares que se inyectaron en esa votación) y `corpusDegraded` (`true` cuando esa lectura del corpus fue degradada — directorio ilegible o alguna entrada corrupta salteada — `false` para un corpus genuinamente vacío o sano). Los tres campos ya están en cada registro del hash chain, pero **ninguno de los tres se muestra todavía** en la salida de `magi audit stats` ni en la pantalla Audit de `magi tui` de abajo — hoy solo son legibles inspeccionando el JSONL crudo bajo `.magi/audit/`.
 
 ### `magi audit override <hash> --reason "<why>"`
 
@@ -500,8 +502,13 @@ Directo del `README.md`, sección "Out of scope" y "What's next":
 
 - **Adapter de pipeline CI/CD**: no hay pipeline de producción todavía para gatear. El shape `InfraPipelineActionSchema` existe en el código como stub tipado, pero la clasificación de severidad para ese source siempre da `high` fijo (fail-closed) — no hay tabla de reglas real todavía.
 - **Modo async con bounded tool loop + escalación humana**: un modelo más fuerte con acceso a herramientas real y acotado, que escale veredictos ambiguos/alta-severidad a un humano con timeout de fallo visible. No está construido.
-- **Layer de config-file para elegir modelo/backend/timeout por evaluador**: hay una exploración (no propuesta, no spec, no diseño, cero código) sobre esto. Hoy la única forma de cambiar el backend de un evaluador es a nivel código (sección 4).
-- **TUI (interfaz de terminal)**: también en fase de exploración — pensada sobre readline/ANSI plano (no un framework como `ink`/`blessed`, por la convención de mínimas dependencias del proyecto), para leer/escribir esa futura config y renderizar `magi audit stats` de forma interactiva. Ninguna de las dos partes está aprobada ni planificada — es exploración, no un compromiso.
+- **Cruzar ground truth contra los votos de los evaluadores** (Fleiss' kappa / correlación de errores) para poner a prueba empíricamente el supuesto de independencia entre Melchior/Balthasar/Casper — puramente conceptual, cero código, requeriría un campo de ground truth nuevo en `CalibrationEntry` que hoy no existe.
+- **`codegraph-context-in-evaluators` y un adapter para OpenCode**: mencionados solo de pasada por el operador, nunca llevados a `sdd-explore` — nada aprobado ni planificado.
+
+Dos cosas que ESTE manual mencionaba antes como "todavía en exploración" ya están construidas y en uso — corregido acá para que esta sección deje de contradecir las secciones 4 y 7 de arriba:
+
+- El layer de config-file para elegir modelo/backend/timeout por evaluador (`magi.config.json`'s `evaluators` key, `src/gating/evaluator-config.ts`) **ya está implementado** — ver sección 4, "Configurar evaluadores vía `magi.config.json`".
+- La TUI interactiva **ya está implementada**, sobre `blessed` (no readline/ANSI plano) — ver sección 7, `magi tui`.
 
 ---
 

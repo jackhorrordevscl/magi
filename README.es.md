@@ -88,6 +88,19 @@ usar `create*`, y pasar el resultado vía `RunHookOptions.evaluators` /
 `MainDeps.evaluators` — ver MANUAL.md, sección 4, para ejemplos concretos
 de ambos cambios de backend.
 
+Más allá de la inyección a nivel código, `magi.config.json` también
+acepta una clave opcional de primer nivel `evaluators` — hermana de
+`tiers`/`paths` — que le permite a un operador setear
+`backend`/`model`/`timeoutMs`/`maxTokens` de cada evaluador nombrado sin
+tocar código ni recompilar (`src/gating/evaluator-config.ts`, leído por
+`melchior.ts`/`balthasar.ts`/`casper.ts`). `apiKey` deliberadamente nunca
+es un campo de config — las API keys siguen siendo solo por variable de
+entorno. Precedencia: la inyección a nivel código (arriba) siempre gana
+sobre esta config; esta config siempre gana sobre los defaults
+hardcodeados. `magi tui` (ver [Comandos de la CLI](#comandos-de-la-cli) más
+abajo) edita esta sección de forma interactiva. Ver MANUAL.md, sección 4,
+para la referencia completa de campos y reglas de validación.
+
 ## Modo shadow: siempre permite, siempre registra
 
 **`MAGI_MODE=shadow` nunca bloquea una llamada a herramienta,
@@ -106,6 +119,16 @@ por hash (`.magi/audit/`) **antes** de que el hook devuelva su decisión
 mide qué habría decidido una puerta enforcing, contra la actividad real
 del agente día a día, sin ningún riesgo de que una puerta demasiado
 agresiva trabe un flujo de trabajo real.
+
+Cada registro de veredicto también carga `calibrationCorpusHash`/
+`exemplarIds` (el snapshot del corpus de calibración y los hashes de los
+ejemplares recuperados detrás de ese voto) y `corpusDegraded` (`true`
+cuando esa lectura del corpus fue degradada — directorio ilegible o una
+entrada corrupta salteada — `false` para un corpus genuinamente vacío o
+sano). Los tres campos ya están en cada registro del hash chain hoy, pero
+todavía no los muestra `magi audit stats` ni la pantalla Audit de `magi
+tui` — por ahora solo son legibles desde el JSONL crudo bajo
+`.magi/audit/`.
 
 Este es un rollout deliberado en dos pasos (ver el plan P1 → P4 de
 `sdd/magi/design`): observar y medir la tasa de falsos positivos primero
