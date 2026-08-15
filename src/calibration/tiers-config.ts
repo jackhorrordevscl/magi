@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import { z } from 'zod';
+import { warn, describeError } from '../shared/log.ts';
 
 /**
  * Standalone `tiers.sync.k` reader — deliberately NOT folded into
@@ -43,14 +44,6 @@ const kCache = new Map<string, number>();
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
-
-function warn(message: string): void {
-  process.stderr.write(`${message}\n`);
-}
-
-function describeError(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
 }
 
 function readAndParseSyncK(configPath: string): number {

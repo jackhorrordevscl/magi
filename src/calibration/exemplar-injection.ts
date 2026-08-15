@@ -1,6 +1,7 @@
 import { CalibrationCorpus, computeCorpusSnapshotHash } from './corpus.ts';
 import { selectExemplars } from './selector.ts';
 import { loadSyncExemplarK } from './tiers-config.ts';
+import { warn, describeError } from '../shared/log.ts';
 import type { CalibrationEntry } from './corpus-schema.ts';
 import type { ProposedAction, SeverityTier } from '../gating/proposed-action.ts';
 
@@ -54,14 +55,6 @@ export function deriveExemplarTag(action: ProposedAction): string {
       return exhaustiveCheck;
     }
   }
-}
-
-function warn(message: string): void {
-  process.stderr.write(`${message}\n`);
-}
-
-function describeError(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
 }
 
 /**
