@@ -158,9 +158,39 @@ Y después lo pasás en el mismo array `evaluators` que espera `runHook`/`RunHoo
 
 **Caveat del free tier**: los prompts que mandás al tier gratuito de Gemini pueden ser usados por Google para entrenamiento. No hay comparación de costos ni de cuotas acá — si te importa esa política de datos, es algo a evaluar antes de elegir este backend.
 
-### Lo que NO existe todavía
+### Configurar evaluadores vía `magi.config.json`
 
-**No hay ninguna forma de cambiar de evaluador vía archivo de configuración.** `magi.config.json` no tiene ni una clave para esto — el único mecanismo hoy es construir el evaluador a mano en código, como en el ejemplo de arriba. Un layer de config-file para elegir modelo/backend/timeout por evaluador está en fase de **exploración**, no aprobado ni planificado — ver sección 11.
+Además del override manual por código de arriba, `magi.config.json` puede tener una clave opcional `evaluators` — hermana de `tiers`/`paths` — que le dice a `melchior`/`balthasar`/`casper` qué backend/modelo/timeout/maxTokens usar por defecto, sin tocar código ni recompilar. La lee y resuelve un módulo nuevo, `src/gating/evaluator-config.ts`, importado por `melchior.ts`/`balthasar.ts`/`casper.ts` (nunca por `main.ts` ni por `claude-code-hook/index.ts` directamente — ambos ya consumen los exports de esos tres archivos, así que la config les llega transitivamente).
+
+Forma del bloque, todos los campos opcionales y cada evaluador independiente del resto:
+
+```jsonc
+"evaluators": {
+  "melchior":  { "backend": "anthropic" | "groq" | "gemini", "model": "…", "timeoutMs": 3000, "maxTokens": 600 },
+  "balthasar": { /* mismos cuatro campos, todos opcionales */ },
+  "casper":    { /* mismos cuatro campos, todos opcionales */ }
+}
+```
+
+Ejemplo real — Casper corriendo contra Gemini en vez de su Groq por defecto:
+
+```jsonc
+"evaluators": {
+  "casper": { "backend": "gemini", "model": "gemini-2.5-flash-lite", "timeoutMs": 3000 }
+}
+```
+
+**Qué pasa con cada campo si falta o es inválido**: cada uno de `backend`/`model`/`timeoutMs`/`maxTokens` cae a su default hardcoded de forma independiente — un campo inválido (tipo incorrecto, `timeoutMs` no positivo, un `backend` no reconocido) nunca invalida a sus hermanos en la misma entrada, y una entrada entera inválida (o el archivo entero siendo JSON inválido) nunca invalida a los otros dos evaluadores. El loader **nunca tira excepción** — a diferencia de `loadConfig()` en `src/cli/main.ts`, que sí explota con un JSON inválido — y cualquier degradación cae siempre hacia atrás, hacia el comportamiento hardcoded de hoy, jamás hacia algo más permisivo. Cada caso inválido emite un warning por `stderr` nombrando el evaluador y el campo rechazado.
+
+**Si cambiás el `backend` sin poner `model`**, el modelo NO hereda el string hardcoded de Groq de ese evaluador (sería mandarle un model ID de Groq a otro proveedor, un error garantizado) — en cambio queda sin setear y el backend elegido aplica su propio modelo por defecto (`claude-3-5-haiku-latest` para Anthropic, `gemini-2.5-flash-lite` para Gemini). Si dejás `backend` en `groq` (u omitido) sin `model`, se sigue usando el modelo hardcoded de ese evaluador puntual, sin cambios.
+
+**`apiKey` nunca es un campo válido acá.** Si aparece en una entrada, el schema lo descarta (nunca llega al constructor del evaluador) y se emite un warning nombrando al evaluador — pero el resto de los campos de esa misma entrada se siguen procesando normalmente, no es un error que invalide toda la entrada. Las API keys siguen viniendo exclusivamente de `GROQ_API_KEY`/`ANTHROPIC_API_KEY`/`GEMINI_API_KEY` en el entorno, como siempre.
+
+**Precedencia** (de mayor a menor): `RunHookOptions.evaluators`/`MainDeps.evaluators` (DI, la inyección manual por código descrita en las secciones anteriores) siempre gana sobre esta config; si no hay DI, esta config gana sobre los defaults hardcoded; si tampoco hay `evaluators` en el archivo (o el archivo no existe), se usan los defaults hardcoded de siempre — comportamiento idéntico al de antes de que este capability existiera.
+
+La config se lee **una sola vez, de forma sincrónica, al arrancar el proceso** (mismo patrón `fs.existsSync`/`fs.readFileSync` que ya usa `loadConfig()`) — no hay hot-reload ni watch: si editás `magi.config.json` mientras el proceso ya está corriendo, no tiene efecto hasta el próximo arranque.
+
+El repo propio no trae poblada esta sección en su `magi.config.json` — se documenta acá la forma, pero el path sin la clave `evaluators` es intencionalmente el que queda probado por defecto.
 
 ---
 

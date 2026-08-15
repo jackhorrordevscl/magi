@@ -1,6 +1,9 @@
 import { GroqEvaluator } from './groq-evaluator.ts';
 import type { GroqEvaluatorOptions } from './groq-evaluator.ts';
 import type { CalibrationFacet } from './anthropic-evaluator.ts';
+import { resolveNamedEvaluator } from './evaluator-config.ts';
+import type { NamedEvaluatorDefaults } from './evaluator-config.ts';
+import type { EvaluatorPort } from './evaluator-port.ts';
 
 /**
  * Casper — the actor-risk/anomaly evaluator, per spec Requirement:
@@ -22,10 +25,19 @@ export const CASPER_FACET: CalibrationFacet = {
     'inherent severity, which the other two evaluators already weigh.',
 };
 
+/** Casper's hardcoded baseline backend/model — the fallback whenever config is absent or a field is omitted. */
+export const CASPER_DEFAULTS: NamedEvaluatorDefaults = { backend: 'groq', model: 'llama-3.1-8b-instant' };
+
 /** Creates a Casper evaluator instance. `options` allows test/DI overrides (client, model, timeoutMs, apiKey). */
 export function createCasper(options: GroqEvaluatorOptions = {}): GroqEvaluator {
-  return new GroqEvaluator('casper', CASPER_FACET, { model: 'llama-3.1-8b-instant', ...options });
+  return new GroqEvaluator('casper', CASPER_FACET, { model: CASPER_DEFAULTS.model, ...options });
 }
 
-/** Default Casper instance, backed by Groq's free tier (`GROQ_API_KEY`), model: llama-3.1-8b-instant. */
-export const casper: GroqEvaluator = createCasper();
+/**
+ * Default Casper instance. Backend/model/timeoutMs/maxTokens are resolved
+ * from `magi.config.json`'s `evaluators.casper` section (see
+ * `src/gating/evaluator-config.ts`) when present, falling back field-by-field
+ * to the hardcoded Groq defaults above (`GROQ_API_KEY`, model:
+ * llama-3.1-8b-instant) exactly as before this capability existed.
+ */
+export const casper: EvaluatorPort = resolveNamedEvaluator('casper', CASPER_FACET, CASPER_DEFAULTS);
