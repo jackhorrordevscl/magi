@@ -127,6 +127,17 @@ export function detailLines(record: AuditRecord | undefined): string[] {
   return lines;
 }
 
+/**
+ * Wraps any line starting with `CORPUS_DEGRADED_LINE_PREFIX` in `{red-fg}...{/red-fg}`
+ * tags, leaving all other lines untouched. Pure/`blessed`-free (mirrors `detailLines`)
+ * so it is directly testable without a tty: extracted out of `loadAuditTabOnce()`'s
+ * widget-touching closure specifically so `tests/cli/tui/app.test.ts` can cover the
+ * TUI half of spec scenario "Corpus-degraded state is visually flagged as an alarm".
+ */
+export function highlightAlarmLines(lines: string[]): string[] {
+  return lines.map((line) => (line.startsWith(CORPUS_DEGRADED_LINE_PREFIX) ? `{red-fg}${line}{/red-fg}` : line));
+}
+
 function fieldRowLabel(field: FieldName, entry: EvaluatorSettings, effective: EffectiveSettings): string {
   const text = fieldValueText(field, entry, effective);
   const label = field.padEnd(10);
@@ -306,10 +317,7 @@ export async function runTui(options: RunTuiOptions): Promise<number> {
         .filter((record): record is AuditRecord => 'decision' in record && record.decision === 'deny')
         .map((record) => [record.hash, record]),
     );
-    const highlighted = summary.lines.map((line) =>
-      line.startsWith(CORPUS_DEGRADED_LINE_PREFIX) ? `{red-fg}${line}{/red-fg}` : line,
-    );
-    summaryBox.setContent(highlighted.join('\n'));
+    summaryBox.setContent(highlightAlarmLines(summary.lines).join('\n'));
     deniedListBox.setLabel(footer ? ` Denied Records — ${footer} ` : ' Denied Records ');
     deniedListBox.setItems(auditRows.map((row) => deniedRowLabel(row)));
     auditLoaded = true;

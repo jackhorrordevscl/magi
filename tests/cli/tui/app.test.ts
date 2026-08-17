@@ -5,10 +5,12 @@ import {
   deniedRowLabel,
   detailLines,
   fieldValueText,
+  highlightAlarmLines,
   pendingHasUnsavedChanges,
   runTui,
 } from '../../../src/cli/tui/app.ts';
 import { effectiveSettings } from '../../../src/cli/tui/effective-settings.ts';
+import { CORPUS_DEGRADED_LINE_PREFIX } from '../../../src/cli/audit-stats.ts';
 import type { EvaluatorSettings, EvaluatorsConfig } from '../../../src/gating/evaluator-config.ts';
 import type { DeniedRecordRow } from '../../../src/cli/tui/audit-view.ts';
 import type { AuditRecord } from '../../../src/audit/record.ts';
@@ -156,5 +158,25 @@ describe('detailLines — record detail view (openDetail(), sdd/audit-blind-fiel
 
     const notDegraded = detailLines(record({ corpusDegraded: false }));
     assert.ok(!notDegraded.some((l) => l.includes('corpus degraded')));
+  });
+});
+
+describe('highlightAlarmLines — audit summary alarm highlighting (loadAuditTabOnce(), sdd/audit-blind-fields-visibility)', () => {
+  test('Corpus-degraded state is visually flagged as an alarm (TUI half)', () => {
+    const lines = [
+      'Denied: 3 of 10 (30.0%)',
+      `${CORPUS_DEGRADED_LINE_PREFIX} 1 of 10 (10.0%) — ALARM`,
+      'Corpus hashes seen: 2 distinct; exemplar coverage: 8 of 10 (80.0%)',
+    ];
+    const highlighted = highlightAlarmLines(lines);
+
+    assert.equal(highlighted[0], lines[0]);
+    assert.equal(highlighted[1], `{red-fg}${lines[1]}{/red-fg}`);
+    assert.equal(highlighted[2], lines[2]);
+  });
+
+  test('a summary with no degraded line leaves every line untouched', () => {
+    const lines = ['Denied: 0 of 10 (0.0%)', 'Corpus hashes seen: 1 distinct; exemplar coverage: 10 of 10 (100.0%)'];
+    assert.deepEqual(highlightAlarmLines(lines), lines);
   });
 });
