@@ -128,14 +128,18 @@ export function detailLines(record: AuditRecord | undefined): string[] {
 }
 
 /**
- * Wraps any line starting with `CORPUS_DEGRADED_LINE_PREFIX` in `{red-fg}...{/red-fg}`
- * tags, leaving all other lines untouched. Pure/`blessed`-free (mirrors `detailLines`)
- * so it is directly testable without a tty: extracted out of `loadAuditTabOnce()`'s
- * widget-touching closure specifically so `tests/cli/tui/app.test.ts` can cover the
- * TUI half of spec scenario "Corpus-degraded state is visually flagged as an alarm".
+ * Wraps the corpus-degraded line in `{red-fg}...{/red-fg}` only when it is an actual
+ * alarm (`corpusDegradedCount > 0`, signaled by `formatAuditStats`'s `— ALARM` suffix),
+ * leaving all other lines — including a zero-degraded-count summary — untouched. A plain
+ * prefix match would color the line red even at 0 degraded records. Pure/`blessed`-free
+ * (mirrors `detailLines`) so it is directly testable without a tty: extracted out of
+ * `loadAuditTabOnce()`'s widget-touching closure specifically so `tests/cli/tui/app.test.ts`
+ * can cover the TUI half of spec scenario "Corpus-degraded state is visually flagged as an alarm".
  */
 export function highlightAlarmLines(lines: string[]): string[] {
-  return lines.map((line) => (line.startsWith(CORPUS_DEGRADED_LINE_PREFIX) ? `{red-fg}${line}{/red-fg}` : line));
+  return lines.map((line) =>
+    line.startsWith(CORPUS_DEGRADED_LINE_PREFIX) && line.endsWith('— ALARM') ? `{red-fg}${line}{/red-fg}` : line,
+  );
 }
 
 function fieldRowLabel(field: FieldName, entry: EvaluatorSettings, effective: EffectiveSettings): string {

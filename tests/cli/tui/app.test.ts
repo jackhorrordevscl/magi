@@ -179,4 +179,9 @@ describe('highlightAlarmLines — audit summary alarm highlighting (loadAuditTab
     const lines = ['Denied: 0 of 10 (0.0%)', 'Corpus hashes seen: 1 distinct; exemplar coverage: 10 of 10 (100.0%)'];
     assert.deepEqual(highlightAlarmLines(lines), lines);
   });
+
+  test('a zero-degraded-count corpus line (no — ALARM suffix) is not colored red', () => {
+    const lines = [`${CORPUS_DEGRADED_LINE_PREFIX} 0 of 0 (0.0%)`];
+    assert.deepEqual(highlightAlarmLines(lines), lines);
+  });
 });
