@@ -15,9 +15,6 @@ import type { ProposedAction } from './proposed-action.ts';
  * command shape (via the Phase 2 shell parser) rather than trusting an
  * adapter's self-reported `actionType`, so a mislabeled or malicious
  * adapter tag can never smuggle a mutating command through as "trivial".
- *
- * TODO(PR4): wire isTrivial() as the first short-circuit step in the
- * Claude Code hook adapter.
  */
 
 const SAFE_READ_EXECUTABLES = new Set(['cat', 'head', 'tail', 'less', 'more', 'wc']);
