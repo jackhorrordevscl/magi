@@ -30,7 +30,20 @@ export interface AuditStats {
   overrideCount: number;
   /** `overrideCount / byDecision.deny` — "share of denies a human disputed". `0` when there are no denies. */
   overrideRate: number;
+  /** Verdict records with `corpusDegraded === true`. Non-zero is an ALARM (operator decision, 2026-08-17). */
+  corpusDegradedCount: number;
+  /** `corpusDegradedCount / totalRecords`; `0` when there are no verdict records. */
+  corpusDegradedRate: number;
+  /** Distinct NON-EMPTY `calibrationCorpusHash` values. `''` (empty/degraded corpus) is excluded. Plain churn count — no alarm. */
+  distinctCorpusHashes: number;
+  /** Verdict records with `exemplarIds.length > 0`. */
+  recordsWithExemplars: number;
+  /** `recordsWithExemplars / totalRecords`; `0` when there are no verdict records. */
+  exemplarCoverageRate: number;
 }
+
+/** Line prefix used by `formatAuditStats()` for the corpus-degraded line — the exported contract `app.ts` matches on to apply alarm styling, without any blessed markup in this shared formatter (design decision, sdd/audit-blind-fields-visibility). */
+export const CORPUS_DEGRADED_LINE_PREFIX = 'Corpus degraded:';
 
 const ZERO_DECISION: Record<AuditDecision, number> = { allow: 0, deny: 0 };
 const ZERO_SEVERITY: Record<SeverityTier, number> = { low: 0, medium: 0, high: 0, critical: 0 };
@@ -58,14 +71,25 @@ export function computeAuditStats(auditDir: string = DEFAULT_AUDIT_DIR): AuditSt
 
   const byDecision: Record<AuditDecision, number> = { ...ZERO_DECISION };
   const bySeverity: Record<SeverityTier, number> = { ...ZERO_SEVERITY };
+  let corpusDegradedCount = 0;
+  let recordsWithExemplars = 0;
+  const corpusHashes = new Set<string>();
   for (const record of verdictRecords) {
     byDecision[record.decision] += 1;
     bySeverity[record.severity] += 1;
+    if (record.corpusDegraded) corpusDegradedCount += 1;
+    if (record.exemplarIds.length > 0) recordsWithExemplars += 1;
+    // '' means an empty-or-degraded corpus (ExemplarSelection.corpusHash /
+    // EMPTY_SELECTION) — not a real corpus version, so it never counts as a
+    // distinct hash (design decision, sdd/audit-blind-fields-visibility).
+    if (record.calibrationCorpusHash !== '') corpusHashes.add(record.calibrationCorpusHash);
   }
 
   const denyRateProxy = verdictRecords.length === 0 ? 0 : byDecision.deny / verdictRecords.length;
   const overrideCount = overrideRecords.length;
   const overrideRate = byDecision.deny === 0 ? 0 : overrideCount / byDecision.deny;
+  const corpusDegradedRate = verdictRecords.length === 0 ? 0 : corpusDegradedCount / verdictRecords.length;
+  const exemplarCoverageRate = verdictRecords.length === 0 ? 0 : recordsWithExemplars / verdictRecords.length;
 
   return {
     totalRecords: verdictRecords.length,
@@ -74,6 +98,11 @@ export function computeAuditStats(auditDir: string = DEFAULT_AUDIT_DIR): AuditSt
     denyRateProxy,
     overrideCount,
     overrideRate,
+    corpusDegradedCount,
+    corpusDegradedRate,
+    distinctCorpusHashes: corpusHashes.size,
+    recordsWithExemplars,
+    exemplarCoverageRate,
   };
 }
 
@@ -88,5 +117,10 @@ export function formatAuditStats(stats: AuditStats): string[] {
       '(raw proxy only — confirm each denial with a human before treating it as a real false positive)',
     `Overrides: ${stats.overrideCount} (${(stats.overrideRate * 100).toFixed(1)}% of denies overridden — ` +
       'documentary only, does not reclassify the original deny)',
+    `${CORPUS_DEGRADED_LINE_PREFIX} ${stats.corpusDegradedCount} of ${stats.totalRecords} ` +
+      `(${(stats.corpusDegradedRate * 100).toFixed(1)}%)` +
+      (stats.corpusDegradedCount > 0 ? ' — ALARM' : ''),
+    `Corpus hashes seen: ${stats.distinctCorpusHashes} distinct; exemplar coverage: ` +
+      `${stats.recordsWithExemplars} of ${stats.totalRecords} (${(stats.exemplarCoverageRate * 100).toFixed(1)}%)`,
   ];
 }

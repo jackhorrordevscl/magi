@@ -1,9 +1,17 @@
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
-import { clearField, deniedRowLabel, fieldValueText, pendingHasUnsavedChanges, runTui } from '../../../src/cli/tui/app.ts';
+import {
+  clearField,
+  deniedRowLabel,
+  detailLines,
+  fieldValueText,
+  pendingHasUnsavedChanges,
+  runTui,
+} from '../../../src/cli/tui/app.ts';
 import { effectiveSettings } from '../../../src/cli/tui/effective-settings.ts';
 import type { EvaluatorSettings, EvaluatorsConfig } from '../../../src/gating/evaluator-config.ts';
 import type { DeniedRecordRow } from '../../../src/cli/tui/audit-view.ts';
+import type { AuditRecord } from '../../../src/audit/record.ts';
 
 /**
  * `app.ts` builds the `blessed` screen — inherently hard to unit-test
@@ -97,5 +105,56 @@ describe('deniedRowLabel — audit denied-row rendering', () => {
       severity: 'high',
     };
     assert.equal(deniedRowLabel(row), '7 · 2026-08-12T10:00:00.000Z · high · abcdef01234');
+  });
+});
+
+describe('detailLines — record detail view (openDetail(), sdd/audit-blind-fields-visibility)', () => {
+  function record(overrides: Partial<AuditRecord> = {}): AuditRecord {
+    return {
+      seq: 1,
+      prevHash: '',
+      hash: 'deadbeef0123456789',
+      timestamp: '2026-08-17T10:00:00.000Z',
+      actor: 'test-agent',
+      mode: 'shadow',
+      action: 'git status',
+      severity: 'high',
+      votes: [
+        { evaluator: 'melchior', vote: 'deny', rationale: 'risky' },
+        { evaluator: 'balthasar', vote: 'allow', rationale: 'ok' },
+        { evaluator: 'casper', vote: 'deny', rationale: 'risky' },
+      ],
+      decision: 'deny',
+      calibrationCorpusHash: 'abcdef0123456789',
+      exemplarIds: ['ex1', 'ex2'],
+      corpusDegraded: false,
+      ...overrides,
+    };
+  }
+
+  test('an undefined record renders the unavailable placeholder', () => {
+    assert.deepEqual(detailLines(undefined), ['record detail unavailable']);
+  });
+
+  test('Detail view shows calibration fields for a selected denied record', () => {
+    const lines = detailLines(record());
+    assert.ok(lines.some((l) => l === 'actor: test-agent'));
+    assert.ok(lines.some((l) => l === 'action: git status'));
+    assert.ok(lines.some((l) => l.startsWith('votes:')));
+    assert.ok(lines.some((l) => l === 'corpus: abcdef012345'));
+    assert.ok(lines.some((l) => l === 'exemplars: 2'));
+  });
+
+  test('an empty calibrationCorpusHash renders "(none)" for the corpus line', () => {
+    const lines = detailLines(record({ calibrationCorpusHash: '' }));
+    assert.ok(lines.some((l) => l === 'corpus: (none)'));
+  });
+
+  test('Degraded record is highlighted in detail view', () => {
+    const degraded = detailLines(record({ corpusDegraded: true }));
+    assert.ok(degraded.some((l) => l === '{red-fg}corpus degraded: yes — ALARM{/red-fg}'));
+
+    const notDegraded = detailLines(record({ corpusDegraded: false }));
+    assert.ok(!notDegraded.some((l) => l.includes('corpus degraded')));
   });
 });

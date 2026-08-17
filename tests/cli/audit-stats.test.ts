@@ -89,6 +89,88 @@ describe('formatAuditStats — human-readable rendering', () => {
   });
 });
 
+describe('computeAuditStats — calibration blind fields (sdd/audit-blind-fields-visibility)', () => {
+  test('mixed degraded/non-degraded, mixed corpus hashes, mixed exemplar coverage aggregate correctly', () => {
+    const dir = tmpAuditDir();
+    const sink = new FsAppendAuditSink(dir);
+    const now = new Date('2026-08-17T10:00:00.000Z');
+
+    // 2 degraded, 3 non-degraded
+    sink.append(verdict({ corpusDegraded: true, calibrationCorpusHash: '', exemplarIds: [] }), now);
+    sink.append(verdict({ corpusDegraded: true, calibrationCorpusHash: '', exemplarIds: [] }), now);
+    sink.append(verdict({ corpusDegraded: false, calibrationCorpusHash: 'hash-a', exemplarIds: ['ex1'] }), now);
+    sink.append(verdict({ corpusDegraded: false, calibrationCorpusHash: 'hash-a', exemplarIds: ['ex2', 'ex3'] }), now);
+    sink.append(verdict({ corpusDegraded: false, calibrationCorpusHash: 'hash-b', exemplarIds: [] }), now);
+
+    const stats = computeAuditStats(dir);
+
+    assert.equal(stats.totalRecords, 5);
+    assert.equal(stats.corpusDegradedCount, 2);
+    assert.equal(stats.corpusDegradedRate, 2 / 5);
+    // '' (empty/degraded) is excluded — only 'hash-a' and 'hash-b' count.
+    assert.equal(stats.distinctCorpusHashes, 2);
+    assert.equal(stats.recordsWithExemplars, 2);
+    assert.equal(stats.exemplarCoverageRate, 2 / 5);
+  });
+
+  test('empty-chain and override-only-chain: all 3 new rates are 0, never NaN', () => {
+    const emptyDir = path.join(os.tmpdir(), 'magi-audit-stats-blind-fields-empty');
+    const emptyStats = computeAuditStats(emptyDir);
+    assert.equal(emptyStats.corpusDegradedRate, 0);
+    assert.equal(emptyStats.exemplarCoverageRate, 0);
+    assert.equal(emptyStats.distinctCorpusHashes, 0);
+    assert.ok(!Number.isNaN(emptyStats.corpusDegradedRate));
+    assert.ok(!Number.isNaN(emptyStats.exemplarCoverageRate));
+
+    const overrideOnlyDir = tmpAuditDir();
+    const sink = new FsAppendAuditSink(overrideOnlyDir);
+    const now = new Date('2026-08-17T10:00:00.000Z');
+    const denied = sink.append(verdict({ decision: 'deny' }), now);
+    sink.appendOverride(
+      { targetHash: denied.hash, targetSeq: denied.seq, actor: 'operator', reason: 'verified manually' },
+      now,
+    );
+    // "override-only" here means: the only NEW records added after the base
+    // deny are overrides — assert the rates still resolve cleanly and never
+    // NaN even when totalRecords is small and non-zero.
+    const overrideOnlyStats = computeAuditStats(overrideOnlyDir);
+    assert.ok(!Number.isNaN(overrideOnlyStats.corpusDegradedRate));
+    assert.ok(!Number.isNaN(overrideOnlyStats.exemplarCoverageRate));
+    assert.equal(overrideOnlyStats.corpusDegradedRate, 0);
+    assert.equal(overrideOnlyStats.exemplarCoverageRate, 0);
+  });
+});
+
+describe('formatAuditStats — calibration blind fields rendering', () => {
+  test('emits "— ALARM" iff corpusDegradedCount > 0', () => {
+    const degradedStats = computeAuditStats(tmpAuditDir());
+    const dir = tmpAuditDir();
+    const sink = new FsAppendAuditSink(dir);
+    sink.append(verdict({ corpusDegraded: true }), new Date('2026-08-17T10:00:00.000Z'));
+    const withDegraded = formatAuditStats(computeAuditStats(dir));
+    assert.ok(withDegraded.some((l) => l.includes('Corpus degraded:') && l.includes('— ALARM')));
+
+    const withoutDegraded = formatAuditStats(degradedStats);
+    assert.ok(withoutDegraded.some((l) => l.includes('Corpus degraded:')));
+    assert.ok(!withoutDegraded.some((l) => l.includes('— ALARM')));
+  });
+
+  test('the hash-churn line never contains alarm wording', () => {
+    const dir = tmpAuditDir();
+    const sink = new FsAppendAuditSink(dir);
+    const now = new Date('2026-08-17T10:00:00.000Z');
+    sink.append(verdict({ calibrationCorpusHash: 'hash-a' }), now);
+    sink.append(verdict({ calibrationCorpusHash: 'hash-b' }), now);
+    sink.append(verdict({ calibrationCorpusHash: 'hash-c' }), now);
+
+    const lines = formatAuditStats(computeAuditStats(dir));
+    const churnLine = lines.find((l) => l.startsWith('Corpus hashes seen:'));
+    assert.ok(churnLine);
+    assert.ok(!churnLine.toLowerCase().includes('alarm'));
+    assert.ok(!churnLine.toLowerCase().includes('warn'));
+  });
+});
+
 describe('computeAuditStats — override accounting (design decision #8)', () => {
   test('5 denies + 2 overrides: byDecision.deny stays 5, overrideCount is 2, denyRateProxy excludes overrides', () => {
     const dir = tmpAuditDir();

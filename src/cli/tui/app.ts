@@ -12,6 +12,7 @@ import { auditSummary, deniedRecords, deniedRecordsFooter } from './audit-view.t
 import type { DeniedRecordRow } from './audit-view.ts';
 import { readChainRecords } from '../../audit/read-chain.ts';
 import type { AuditRecord } from '../../audit/record.ts';
+import { CORPUS_DEGRADED_LINE_PREFIX } from '../audit-stats.ts';
 
 /**
  * The `magi tui` screen — the only file in this change that touches
@@ -43,6 +44,17 @@ const EVALUATOR_NAMES: readonly EvaluatorName[] = ['melchior', 'balthasar', 'cas
 const FIELD_NAMES: readonly FieldName[] = ['backend', 'model', 'timeoutMs', 'maxTokens'];
 const FIRST_EVALUATOR: EvaluatorName = 'melchior';
 const FIRST_FIELD: FieldName = 'backend';
+
+/**
+ * `summaryBox`'s fixed height (and, transitively, `deniedListBox.top`'s
+ * offset and its own `100%-N` height) — one constant shared across all three
+ * sites so the box and the list beneath it can never drift apart. 12 = 10
+ * content rows after borders; a regression test
+ * (`tests/cli/tui/audit-view.test.ts`) asserts the worst-case wrapped-line
+ * budget at a reference 78-column inner width never exceeds
+ * `AUDIT_SUMMARY_BOX_HEIGHT - 2` (sdd/audit-blind-fields-visibility design).
+ */
+export const AUDIT_SUMMARY_BOX_HEIGHT = 12;
 
 const HELP_TEXT = [
   'Global',
@@ -89,6 +101,30 @@ export function pendingHasUnsavedChanges(pending: EvaluatorsConfig, saved: Evalu
 
 export function deniedRowLabel(row: DeniedRecordRow): string {
   return `${row.seq} · ${row.timestamp} · ${row.severity} · ${row.hash.slice(0, 11)}`;
+}
+
+/**
+ * Renders `openDetail()`'s content lines for a selected denied record.
+ * Pure/`blessed`-free (mirrors `deniedRowLabel`) so it is directly testable
+ * without a tty: extracted out of `openDetail()`'s widget-touching closure
+ * specifically so `tests/cli/tui/app.test.ts` can cover the calibration-
+ * provenance lines (spec: "Record Detail Exposes Calibration Provenance").
+ * `record` is already in memory via `auditDetailByHash` — no new reads.
+ */
+export function detailLines(record: AuditRecord | undefined): string[] {
+  if (!record) return ['record detail unavailable'];
+  const corpusHash = record.calibrationCorpusHash.slice(0, 12) || '(none)';
+  const lines = [
+    `actor: ${record.actor}`,
+    `action: ${record.action}`,
+    `votes: ${record.votes.map((vote) => `${vote.evaluator}=${vote.vote}`).join(', ')}`,
+    `corpus: ${corpusHash}`,
+    `exemplars: ${record.exemplarIds.length}`,
+  ];
+  if (record.corpusDegraded) {
+    lines.push('{red-fg}corpus degraded: yes — ALARM{/red-fg}');
+  }
+  return lines;
 }
 
 function fieldRowLabel(field: FieldName, entry: EvaluatorSettings, effective: EffectiveSettings): string {
@@ -182,17 +218,17 @@ export async function runTui(options: RunTuiOptions): Promise<number> {
     top: 0,
     left: 0,
     width: '100%',
-    height: 8,
+    height: AUDIT_SUMMARY_BOX_HEIGHT,
     tags: true,
   });
   const deniedListBox: Widgets.ListElement = blessed.list({
     parent: auditContainer,
     label: ' Denied Records ',
     border: 'line',
-    top: 8,
+    top: AUDIT_SUMMARY_BOX_HEIGHT,
     left: 0,
     width: '100%',
-    height: '100%-8',
+    height: `100%-${AUDIT_SUMMARY_BOX_HEIGHT}`,
     tags: true,
     keys: true,
     items: [],
@@ -270,7 +306,10 @@ export async function runTui(options: RunTuiOptions): Promise<number> {
         .filter((record): record is AuditRecord => 'decision' in record && record.decision === 'deny')
         .map((record) => [record.hash, record]),
     );
-    summaryBox.setContent(summary.lines.join('\n'));
+    const highlighted = summary.lines.map((line) =>
+      line.startsWith(CORPUS_DEGRADED_LINE_PREFIX) ? `{red-fg}${line}{/red-fg}` : line,
+    );
+    summaryBox.setContent(highlighted.join('\n'));
     deniedListBox.setLabel(footer ? ` Denied Records — ${footer} ` : ' Denied Records ');
     deniedListBox.setItems(auditRows.map((row) => deniedRowLabel(row)));
     auditLoaded = true;
@@ -447,14 +486,7 @@ export async function runTui(options: RunTuiOptions): Promise<number> {
     const row = auditRows[index];
     if (!row) return;
     const record = auditDetailByHash.get(row.hash);
-    const lines = record
-      ? [
-          `actor: ${record.actor}`,
-          `action: ${record.action}`,
-          `votes: ${record.votes.map((vote) => `${vote.evaluator}=${vote.vote}`).join(', ')}`,
-        ]
-      : ['record detail unavailable'];
-    detailBox.setContent(lines.join('\n'));
+    detailBox.setContent(detailLines(record).join('\n'));
     detailBox.show();
     screen.render();
   }

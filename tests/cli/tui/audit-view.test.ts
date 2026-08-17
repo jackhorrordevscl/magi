@@ -5,8 +5,10 @@ import os from 'node:os';
 import path from 'node:path';
 import { auditSummary, deniedRecords, deniedRecordsFooter } from '../../../src/cli/tui/audit-view.ts';
 import { computeAuditStats, formatAuditStats } from '../../../src/cli/audit-stats.ts';
+import type { AuditStats } from '../../../src/cli/audit-stats.ts';
 import { FsAppendAuditSink } from '../../../src/audit/fs-append-sink.ts';
 import type { Verdict } from '../../../src/gating/verdict.ts';
+import { AUDIT_SUMMARY_BOX_HEIGHT } from '../../../src/cli/tui/app.ts';
 
 // --- Fixtures ---------------------------------------------------------
 
@@ -68,6 +70,34 @@ describe('auditSummary — reuses existing aggregation, no new logic', () => {
     assert.deepEqual(view.lines, formatAuditStats(cliStats));
     assert.equal(view.stats.totalRecords, 3);
     assert.equal(view.stats.byDecision.deny, 2);
+  });
+});
+
+// --- Summary box layout budget (sdd/audit-blind-fields-visibility) --------
+
+describe('summaryBox layout budget — worst-case 6-digit stats never clip', () => {
+  test('sum(ceil(len/78)) over formatAuditStats() output stays within AUDIT_SUMMARY_BOX_HEIGHT - 2', () => {
+    const worstCaseStats: AuditStats = {
+      totalRecords: 999999,
+      byDecision: { allow: 999999, deny: 999999 },
+      bySeverity: { low: 999999, medium: 999999, high: 999999, critical: 999999 },
+      denyRateProxy: 0.999999,
+      overrideCount: 999999,
+      overrideRate: 0.999999,
+      corpusDegradedCount: 999999,
+      corpusDegradedRate: 0.999999,
+      distinctCorpusHashes: 999999,
+      recordsWithExemplars: 999999,
+      exemplarCoverageRate: 0.999999,
+    };
+
+    const lines = formatAuditStats(worstCaseStats);
+    const wrappedRows = lines.reduce((sum, line) => sum + Math.ceil(line.length / 78), 0);
+
+    assert.ok(
+      wrappedRows <= AUDIT_SUMMARY_BOX_HEIGHT - 2,
+      `wrapped rows ${wrappedRows} exceed budget ${AUDIT_SUMMARY_BOX_HEIGHT - 2} (lines: ${JSON.stringify(lines)})`,
+    );
   });
 });
 
