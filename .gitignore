@@ -17,3 +17,6 @@ dist/
 # Local tooling state (SDD skill registry cache, CodeGraph index)
 .atl/
 .codegraph/
+
+# Git worktrees created under the repo (each worktree is its own checkout)
+.claude/worktrees/
