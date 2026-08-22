@@ -17,3 +17,6 @@ dist/
 # Local tooling state (SDD skill registry cache, CodeGraph index)
 .atl/
 .codegraph/
+
+# Claude Code local overrides — untracked, survives branch switches
+.claude/settings.local.json
