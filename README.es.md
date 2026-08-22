@@ -125,13 +125,13 @@ Cada registro de veredicto también carga `calibrationCorpusHash`/
 ejemplares recuperados detrás de ese voto) y `corpusDegraded` (`true`
 cuando esa lectura del corpus fue degradada — directorio ilegible o una
 entrada corrupta salteada — `false` para un corpus genuinamente vacío o
-sano). `magi audit stats` y la pantalla Audit de `magi tui` muestran
-estos campos como agregados: cuántos registros tuvieron una lectura de
-corpus degradada (marcado como alarma cuando es distinto de cero),
-cuántos hashes de corpus distintos se vieron, y qué proporción de
-registros llevó al menos un ejemplar recuperado. Los valores crudos por
-registro siguen siendo legibles desde el JSONL bajo `.magi/audit/` y
-desde la vista de detalle de un registro en `magi tui`.
+sano). Los tres campos ya están en cada registro del hash chain y ya los
+muestra tanto `magi audit stats` (conteo/tasa de corpus degradado,
+hashes de corpus distintos, cobertura de exemplares) como la pantalla
+Audit de `magi tui` (corpus hash/cantidad de exemplares por registro,
+más una línea de alarma resaltada en rojo cuando `corpusDegraded` es
+`true`) — el JSONL crudo bajo `.magi/audit/` sigue disponible para
+cualquier cosa que las vistas resumidas no cubran.
 
 Este es un rollout deliberado en dos pasos (ver el plan P1 → P4 de
 `sdd/magi/design`): observar y medir la tasa de falsos positivos primero
@@ -341,6 +341,13 @@ veredicto calculado es `deny`; cualquier otro caso (modo shadow, un
 veredicto `allow`, el cortocircuito trivial, o un fallo del lado del
 adaptador — que siempre falla abierto) reporta `"allow"`.
 
+Este repositorio se gatea a sí mismo: `.claude/settings.json` conecta un
+hook `PreToolUse` que corre `node claude-code-hook/index.ts` con
+`MAGI_MODE=shadow` en cada llamada a herramientas dentro de una sesión de
+Claude Code trabajando sobre este repo (commit `c0e9602`). Es dogfooding
+real — las propias sesiones de desarrollo de MAGI son auditadas por MAGI,
+sin bloquear nada.
+
 ## Referencias de arquitectura
 
 - [MANUAL.md](MANUAL.md) — la guía práctica de uso día a día (modos,
@@ -363,6 +370,10 @@ adaptador — que siempre falla abierto) reporta `"allow"`.
 
 ## Qué sigue — exploración en curso, aún sin planificar
 
-`codegraph-context-in-evaluators` y un adaptador para OpenCode fueron
-mencionados de pasada, pero ninguno de los dos pasó todavía por
-exploración formal — nada aprobado ni planificado por ahora.
+`codegraph-context-in-evaluators` solo fue mencionado de pasada, nunca
+pasó por exploración formal. Un adaptador para OpenCode sí se exploró
+(`sdd/explore/opencode-adapter`): es técnicamente viable reusar `runHook`
+sin modificarlo, desde un módulo standalone nuevo (plugin in-process),
+pero todavía no está aprobado para pasar a `sdd-propose` — faltan una
+decisión del operador sobre el discriminated union de `ProposedAction` y
+la confirmación del contrato oficial de plugins de OpenCode.

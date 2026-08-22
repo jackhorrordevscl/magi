@@ -34,8 +34,8 @@ compound chain where even one sub-command falls outside the set above.
 - `infra_pipeline` actions (CI adapter — deferred to a later PR) are never
   trivial in this PR's scope; there is no command shape to verify yet.
 
-## Wiring (deferred)
+## Wiring
 
-`isTrivial()` is intended to be the first short-circuit step in the Claude
-Code hook adapter. That wiring happens in the Phase 9 hook adapter PR, not
-this one — see the `// TODO(PR4)` marker in `src/gating/allowlist.ts`.
+`isTrivial()` is the first short-circuit step in `runHook` (`claude-code-hook/index.ts`):
+a trivial action returns `{ allow: true, trivial: true, verdict: null, record: null }`
+before severity classification, evaluators, or the audit sink ever run.

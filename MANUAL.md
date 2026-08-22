@@ -354,11 +354,13 @@ Decisions — allow: 71, deny: 16
 Severity — low: 40, medium: 22, high: 20, critical: 5
 Deny-rate proxy: 18.4% (raw proxy only — confirm each denial with a human before treating it as a real false positive)
 Overrides: 3 (18.8% of denies overridden — documentary only, does not reclassify the original deny)
+Corpus degraded: 0 of 87 (0.0%)
+Corpus hashes seen: 4 distinct; exemplar coverage: 62 of 87 (71.3%)
 ```
 
 Importante: el "deny-rate proxy" NO es una tasa de falsos positivos real — MAGI no tiene ground truth sobre la intención real del operador. Solo te dice qué tan seguido *habría* bloqueado shadow mode. Confirmar cuáles de esos denies son falsos positivos genuinos requiere que un humano revise los registros denegados uno por uno.
 
-Cada registro de veredicto en el audit log también carga `calibrationCorpusHash`/`exemplarIds` (el snapshot del corpus y los ejemplares que se inyectaron en esa votación) y `corpusDegraded` (`true` cuando esa lectura del corpus fue degradada — directorio ilegible o alguna entrada corrupta salteada — `false` para un corpus genuinamente vacío o sano). Los tres campos ya están en cada registro del hash chain, pero **ninguno de los tres se muestra todavía** en la salida de `magi audit stats` ni en la pantalla Audit de `magi tui` de abajo — hoy solo son legibles inspeccionando el JSONL crudo bajo `.magi/audit/`.
+Cada registro de veredicto en el audit log también carga `calibrationCorpusHash`/`exemplarIds` (el snapshot del corpus y los ejemplares que se inyectaron en esa votación) y `corpusDegraded` (`true` cuando esa lectura del corpus fue degradada — directorio ilegible o alguna entrada corrupta salteada — `false` para un corpus genuinamente vacío o sano). Los tres campos ya están en cada registro del hash chain y **ya se muestran** tanto en `magi audit stats` (las dos líneas de arriba: conteo/tasa de corpus degradado, hashes de corpus distintos y cobertura de exemplares) como en la pantalla Audit de `magi tui` de abajo (corpus hash truncado y cantidad de exemplares por registro). Cuando `corpusDegradedCount` es mayor a cero, la línea "Corpus degraded" se resalta en rojo como ALARMA en ambas superficies — CLI y TUI —, porque significa que al menos un veredicto se calculó con el corpus de calibración degradado.
 
 ### `magi audit override <hash> --reason "<why>"`
 
@@ -375,7 +377,7 @@ $ magi tui
 Dos pantallas, `Tab`/`1`/`2` para alternar:
 
 - **Evaluators** — lista de `melchior`/`balthasar`/`casper` a la izquierda, sus cuatro campos (`backend`/`model`/`timeoutMs`/`maxTokens`) a la derecha. `↑↓`/`j`/`k` mueve el cursor de campo, `←→`/`h`/`l` cambia de evaluador, `Enter` edita el campo seleccionado (un picker para `backend`, un textbox para el resto), `d` lo limpia (vuelve a "sin setear", cae al default). Un campo sin setear se muestra atenuado como `(default: <valor efectivo>)` — el mismo cálculo backend-aware de la sección 4, nunca el valor hardcoded de otro backend.
-- **Audit** — el resumen de `magi audit stats` arriba, la lista de registros `deny` individuales (hash/seq/timestamp/severidad) abajo, más reciente primero, `Enter` abre un detalle de solo lectura (actor/acción/votos).
+- **Audit** — el resumen de `magi audit stats` arriba (incluida la línea "Corpus degraded", resaltada en rojo cuando hay al menos un registro degradado), la lista de registros `deny` individuales (hash/seq/timestamp/severidad) abajo, más reciente primero, `Enter` abre un detalle de solo lectura (actor/acción/votos, corpus hash truncado, cantidad de exemplares, y una línea roja "corpus degraded: yes — ALARM" cuando `corpusDegraded` es `true` en ese registro).
 
 Validación al editar es **estricta**: reusa el mismo schema que `src/gating/evaluator-config.ts` (`EvaluatorsConfigSchema`), así que un valor que la TUI acepta y uno que el loader acepta nunca pueden divergir — un valor inválido se rechaza ahí mismo, en el campo, en rojo, en vez de guardarse y recién avisarte por `stderr` en el próximo arranque del proceso (como sí hace el loader con un `magi.config.json` editado a mano).
 
@@ -503,7 +505,8 @@ Directo del `README.md`, sección "Out of scope" y "What's next":
 - **Adapter de pipeline CI/CD**: no hay pipeline de producción todavía para gatear. El shape `InfraPipelineActionSchema` existe en el código como stub tipado, pero la clasificación de severidad para ese source siempre da `high` fijo (fail-closed) — no hay tabla de reglas real todavía.
 - **Modo async con bounded tool loop + escalación humana**: un modelo más fuerte con acceso a herramientas real y acotado, que escale veredictos ambiguos/alta-severidad a un humano con timeout de fallo visible. No está construido.
 - **Cruzar ground truth contra los votos de los evaluadores** (Fleiss' kappa / correlación de errores) para poner a prueba empíricamente el supuesto de independencia entre Melchior/Balthasar/Casper — puramente conceptual, cero código, requeriría un campo de ground truth nuevo en `CalibrationEntry` que hoy no existe.
-- **`codegraph-context-in-evaluators` y un adapter para OpenCode**: mencionados solo de pasada por el operador, nunca llevados a `sdd-explore` — nada aprobado ni planificado.
+- **`codegraph-context-in-evaluators`**: mencionado solo de pasada por el operador, nunca llevado a `sdd-explore` — nada aprobado ni planificado.
+- **Adapter para OpenCode**: a diferencia de lo anterior, este sí se exploró (`sdd/explore/opencode-adapter`). Conclusión: es técnicamente viable reusar `runHook` sin modificarlo, desde un módulo standalone nuevo (plugin in-process), pero todavía no está aprobado para pasar a `sdd-propose` — faltan una decisión del operador sobre el discriminated union de `ProposedAction` (¿OpenCode reusa `source: 'coding_agent'` o necesita una variante nueva?) y la confirmación del contrato oficial de plugins de OpenCode contra su fuente primaria.
 
 Dos cosas que ESTE manual mencionaba antes como "todavía en exploración" ya están construidas y en uso — corregido acá para que esta sección deje de contradecir las secciones 4 y 7 de arriba:
 

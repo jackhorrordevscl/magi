@@ -114,13 +114,13 @@ Each verdict record also carries `calibrationCorpusHash`/`exemplarIds`
 (the calibration corpus snapshot and retrieved-exemplar hashes behind
 that vote) and `corpusDegraded` (`true` when that corpus read was
 degraded — unreadable directory or a skipped corrupt entry — `false` for
-a genuinely empty or healthy corpus). `magi audit stats` and `magi
-tui`'s Audit screen surface these as aggregates: how many records had a
-degraded corpus read (flagged as an alarm when non-zero), how many
-distinct corpus hashes were seen, and what share of records carried at
-least one retrieved exemplar. The raw per-record values remain readable
-from the JSONL under `.magi/audit/` and from a record's detail view in
-`magi tui`.
+a genuinely empty or healthy corpus). All three are on every chain
+record and are surfaced by `magi audit stats` (corpus-degraded count and
+rate, distinct corpus hashes, exemplar coverage) and by `magi tui`'s
+Audit screen (per-record corpus hash / exemplar count, plus a
+`{red-fg}`-highlighted alarm line whenever `corpusDegraded` is `true`) —
+raw JSONL under `.magi/audit/` remains available for anything the
+summarized views don't cover.
 
 This is a deliberate two-step rollout (see `sdd/magi/design`'s P1 → P4
 plan): observe and measure false-positive rate in shadow mode first,
@@ -317,6 +317,12 @@ computed verdict is `deny`; every other case (shadow mode, an `allow`
 verdict, the trivial short-circuit, or an adapter-side failure — which
 always fails open) reports `"allow"`.
 
+This repository gates itself: `.claude/settings.json` wires a
+`PreToolUse` hook that runs `node claude-code-hook/index.ts` with
+`MAGI_MODE=shadow` on every tool call in a Claude Code session working on
+this repo (commit `c0e9602`). It's dogfooding — MAGI's own development
+sessions are audited by MAGI, without blocking anything.
+
 ## Architecture references
 
 - [MANUAL.md](MANUAL.md) — the practical, day-to-day usage guide (modes,
@@ -337,6 +343,10 @@ always fails open) reports `"allow"`.
 
 ## What's next — exploration in progress, not yet scoped
 
-`codegraph-context-in-evaluators` and an OpenCode adapter have both been
-mentioned in passing but never taken through exploration — nothing
-approved or scheduled yet.
+`codegraph-context-in-evaluators` has only been mentioned in passing,
+never taken through exploration. An OpenCode adapter *was* explored
+(`sdd/explore/opencode-adapter`): reusing `runHook` unmodified from a new
+standalone adapter module (in-process plugin) is technically viable, but
+it isn't approved to move to `sdd-propose` yet — pending an operator
+decision on the `ProposedAction` discriminated union and confirmation of
+OpenCode's official plugin contract.

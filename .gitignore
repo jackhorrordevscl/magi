@@ -18,5 +18,8 @@ dist/
 .atl/
 .codegraph/
 
+# Claude Code local overrides — untracked, survives branch switches
+.claude/settings.local.json
+
 # Git worktrees created under the repo (each worktree is its own checkout)
 .claude/worktrees/
