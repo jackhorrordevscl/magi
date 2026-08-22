@@ -114,10 +114,13 @@ Each verdict record also carries `calibrationCorpusHash`/`exemplarIds`
 (the calibration corpus snapshot and retrieved-exemplar hashes behind
 that vote) and `corpusDegraded` (`true` when that corpus read was
 degraded — unreadable directory or a skipped corrupt entry — `false` for
-a genuinely empty or healthy corpus). All three are on every chain
-record today but are not yet surfaced by `magi audit stats` or `magi
-tui`'s Audit screen — currently readable only from the raw JSONL under
-`.magi/audit/`.
+a genuinely empty or healthy corpus). `magi audit stats` and `magi
+tui`'s Audit screen surface these as aggregates: how many records had a
+degraded corpus read (flagged as an alarm when non-zero), how many
+distinct corpus hashes were seen, and what share of records carried at
+least one retrieved exemplar. The raw per-record values remain readable
+from the JSONL under `.magi/audit/` and from a record's detail view in
+`magi tui`.
 
 This is a deliberate two-step rollout (see `sdd/magi/design`'s P1 → P4
 plan): observe and measure false-positive rate in shadow mode first,

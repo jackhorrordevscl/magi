@@ -125,10 +125,13 @@ Cada registro de veredicto también carga `calibrationCorpusHash`/
 ejemplares recuperados detrás de ese voto) y `corpusDegraded` (`true`
 cuando esa lectura del corpus fue degradada — directorio ilegible o una
 entrada corrupta salteada — `false` para un corpus genuinamente vacío o
-sano). Los tres campos ya están en cada registro del hash chain hoy, pero
-todavía no los muestra `magi audit stats` ni la pantalla Audit de `magi
-tui` — por ahora solo son legibles desde el JSONL crudo bajo
-`.magi/audit/`.
+sano). `magi audit stats` y la pantalla Audit de `magi tui` muestran
+estos campos como agregados: cuántos registros tuvieron una lectura de
+corpus degradada (marcado como alarma cuando es distinto de cero),
+cuántos hashes de corpus distintos se vieron, y qué proporción de
+registros llevó al menos un ejemplar recuperado. Los valores crudos por
+registro siguen siendo legibles desde el JSONL bajo `.magi/audit/` y
+desde la vista de detalle de un registro en `magi tui`.
 
 Este es un rollout deliberado en dos pasos (ver el plan P1 → P4 de
 `sdd/magi/design`): observar y medir la tasa de falsos positivos primero
